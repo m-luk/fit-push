@@ -143,6 +143,38 @@ def _prepare(cols: dict[str, list]) -> dict[str, np.ndarray]:
     return a
 
 
+def _to_lists(a: dict[str, np.ndarray]) -> dict[str, list]:
+    return {c: [float(v) if math.isfinite(v) else None for v in a[c]] for c in CHANNELS}
+
+
+def point_count(cols: dict[str, list]) -> int:
+    """Number of points after cleaning (the index space used by windows)."""
+    return len(_prepare(cols)["t"])
+
+
+def window_columns(cols: dict[str, list], start: int | None = None, end: int | None = None) -> dict[str, list]:
+    """Clean (sort/dedupe) the columns and keep points ``start..end`` inclusive.
+
+    Indices refer to the cleaned point sequence, i.e. the ``series.idx`` values
+    returned by :func:`analyse`.
+    """
+    a = _prepare(cols)
+    n = len(a["t"])
+    start = 0 if start is None else start
+    end = n - 1 if end is None else end
+    if not (0 <= start < end < n):
+        raise ValueError(f"invalid window {start}..{end} for {n} points")
+    return _to_lists({c: a[c][start:end + 1] for c in CHANNELS})
+
+
+def cumulative_distance(cols: dict[str, list]) -> list[float]:
+    """Cumulative distance (m) per cleaned point, using the same source as analytics."""
+    a = _prepare(cols)
+    has_gps = bool((np.isfinite(a["lat"]) & np.isfinite(a["lon"])).sum() >= 2)
+    dist, _ = _distance(a, has_gps)
+    return [float(d) for d in dist]
+
+
 def _distance(a, has_gps) -> tuple[np.ndarray, str]:
     n = len(a["t"])
     dev = a["dist"]
@@ -387,6 +419,7 @@ def analyse(cols: dict[str, list], sport: str = "unknown", settings: dict | None
     idx = _downsample_idx(n, MAX_SERIES_POINTS)
     power_disp = _rolling_mean(np.nan_to_num(power), 5) if has_power else power
     series = {
+        "idx": [int(i) for i in idx],
         "time_s": [_num(v - t[0], 0) for v in t[idx]] if has_time else None,
         "distance_m": [_num(v, 0) for v in dist[idx]],
         "elevation_m": _series_list(ele_s, idx),

@@ -29,6 +29,22 @@ Per activity:
 - best efforts (fastest 400 m … marathon for running; 5–100 km for cycling)
 - charts that share one hover position (elevation, pace/speed, HR, power, cadence, temperature), with the hovered point marked on the map
 
+### Trimming and cutting
+
+Drag across any chart to select a section. The selection is highlighted on
+every chart and on the map. From the selection bar you can:
+
+- **View selection**: open a *temporary* trimmed view. All stats, charts,
+  splits, zones and best efforts are recalculated for that section only. The
+  range is kept in the URL (`#/activity/3?start=600&end=1800`), so the stored
+  activity never changes. You can trim again inside a trimmed view.
+- **Cut to new file**: download the section as GPX, TCX or FIT. The exported
+  files import back into this app and into other tools; FIT files contain
+  file_id, record, lap, session and activity messages with valid CRCs.
+- **Save as activity**: store the section as a new, independent activity.
+
+The full activity can also be exported in any of the three formats.
+
 Across activities: totals, weekly or monthly trend charts (distance, time,
 elevation, training load, count), personal records per sport, and an all-time
 power curve.
@@ -58,6 +74,9 @@ once, and duplicate files are skipped by content hash.
 | `POST` | `/api/activities` | multipart upload (`files`, repeatable) |
 | `GET` | `/api/activities?sport=` | list with summaries |
 | `GET` | `/api/activities/{id}?split=km\|mi` | full analysis: summary, series, track, splits, zones, power curve, best efforts |
+| `GET` | `/api/activities/{id}?start=&end=` | temporary trimmed view (point indices, inclusive; nothing is saved) |
+| `GET` | `/api/activities/{id}/export?format=gpx\|tcx\|fit&start=&end=` | download full activity or trimmed section as a new file |
+| `POST` | `/api/activities/{id}/clip` | `{start, end, name?}`: save section as new activity |
 | `PATCH` | `/api/activities/{id}` | `{name, sport}` |
 | `DELETE` | `/api/activities/{id}` | delete |
 | `GET` | `/api/stats?sport=&period=week\|month` | totals, periods, records, all-time power curve |
@@ -81,6 +100,7 @@ a small FIT encoder, so the tests need no fixture files.
 app/
   parsers.py    FIT / GPX / TCX (+gzip) -> Activity(points)
   analytics.py  numpy-based metrics, splits, zones, power curve, best efforts
+  writers.py    GPX / TCX / FIT writers (export, cut to new file)
   storage.py    SQLite (zlib-compressed point columns)
   main.py       FastAPI routes + static frontend
   static/       index.html, app.js (Chart.js + Leaflet), style.css

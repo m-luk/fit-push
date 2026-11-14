@@ -116,7 +116,7 @@ def parse_gpx(data: bytes) -> Activity:
                     pt.hr = val
                 elif name in ("cad", "cadence"):
                     pt.cad = val
-                elif name in ("power", "watts"):
+                elif name in ("power", "watts", "powerinwatts"):
                     pt.power = val
                 elif name in ("atemp", "wtemp", "temp"):
                     pt.temp = val

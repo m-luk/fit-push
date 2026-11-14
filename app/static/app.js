@@ -183,6 +183,21 @@
   // Crosshair plugin: vertical line + dot at the shared hover index.
   const crosshair = {
     id: "crosshair",
+    beforeDatasetsDraw(chart) {
+      // Shade the drag selection (shared across all synced charts).
+      const sel = state.sel;
+      const ds = chart.data.datasets[0];
+      if (!sel || !chart.$synced || !ds.data[sel.i0] || !ds.data[sel.i1]) return;
+      const { ctx, chartArea, scales } = chart;
+      const x0 = Math.max(chartArea.left, scales.x.getPixelForValue(ds.data[sel.i0].x));
+      const x1 = Math.min(chartArea.right, scales.x.getPixelForValue(ds.data[sel.i1].x));
+      ctx.save();
+      ctx.fillStyle = css("--sel-fill");
+      ctx.fillRect(x0, chartArea.top, x1 - x0, chartArea.bottom - chartArea.top);
+      ctx.strokeStyle = css("--sel-edge"); ctx.lineWidth = 1.5;
+      for (const x of [x0, x1]) { ctx.beginPath(); ctx.moveTo(x, chartArea.top); ctx.lineTo(x, chartArea.bottom); ctx.stroke(); }
+      ctx.restore();
+    },
     afterDatasetsDraw(chart) {
       const i = state.hoverIdx;
       const ds = chart.data.datasets[0];
@@ -326,13 +341,40 @@
   }
 
   // ------------------------------------------------------------------ activity view
-  let map, hoverMarker;
+  let map, hoverMarker, selLine;
 
-  async function renderActivity(id) {
+  const activityHash = (id, w) => `#/activity/${id}` + (w ? `?start=${w.start}&end=${w.end}` : "");
+  function windowQuery(w) { return w ? `&start=${w.start}&end=${w.end}` : ""; }
+  function exportLinks(a, w) {
+    const timed = !!a.series.time_s;
+    return ["gpx", "tcx", "fit"].map((f) => {
+      const disabled = f !== "gpx" && !timed;
+      return disabled
+        ? `<span class="btn small" aria-disabled="true" title="${f.toUpperCase()} needs timestamps">${f.toUpperCase()}</span>`
+        : `<a class="btn small" href="/api/activities/${a.id}/export?format=${f}${windowQuery(w)}" download>${f.toUpperCase()}</a>`;
+    }).join("");
+  }
+  async function saveClip(a, w) {
+    const def = `${a.name} (clip)`;
+    const name = prompt("Name for the new activity:", def);
+    if (name === null) return;
+    try {
+      const r = await api(`/api/activities/${a.id}/clip`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ start: w.start, end: w.end, name: name.trim() || def }),
+      });
+      toast(r.duplicate ? "This selection was already saved — opening it" : "Saved as a new activity");
+      await loadList();
+      location.hash = `#/activity/${r.id}`;
+    } catch (e) { toast("Could not save: " + e.message); }
+  }
+
+  async function renderActivity(id, win) {
     destroyCharts();
+    state.sel = null;
     main.innerHTML = `<div class="spinner">Analysing…</div>`;
     let a;
-    try { a = await api(`/api/activities/${id}?split=${u().split}`); }
+    try { a = await api(`/api/activities/${id}?split=${u().split}${windowQuery(win)}`); }
     catch (e) { main.innerHTML = `<div class="welcome"><h1>Not found</h1><p class="muted">${esc(e.message)}</p><a href="#/">Back to dashboard</a></div>`; return; }
     state.current = a; renderList();
     const s = a.summary;
@@ -365,17 +407,27 @@
           <input class="title-input" id="name-input" value="${esc(a.name)}" aria-label="Activity name" maxlength="200">
           <div class="sub">${sportIcon(a.sport)} ${esc(fmtDate(a.start_time))} · ${esc(a.source_format.toUpperCase())}${a.device ? " · " + esc(a.device) : ""}</div>
         </div>
-        <div style="display:flex;gap:8px;align-items:center">
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          ${a.window ? "" : `<span class="export-group" aria-label="Export full activity"><span class="muted">Export</span>${exportLinks(a, null)}</span>`}
           <select id="sport-sel" aria-label="Sport">${sportOpts.map((o) => `<option value="${esc(o)}" ${o === a.sport ? "selected" : ""}>${esc(sportName(o))}</option>`).join("")}</select>
           <button class="btn danger" id="del-btn">Delete</button>
         </div>
       </div>
+      ${a.window ? `<div class="trim-banner" role="status">
+        <div><strong>Trimmed view</strong> — ${fmtDist(s.distance_m || 0)} ${u().distL}${s.elapsed_s != null ? ` · ${fmtDur(s.elapsed_s)}` : ""}
+          <span class="muted">(points ${a.window.start}–${a.window.end} of ${a.window.total_points}; temporary, the original is unchanged)</span></div>
+        <div class="trim-actions">
+          <span class="export-group"><span class="muted">Cut to new file</span>${exportLinks(a, a.window)}</span>
+          <button class="btn small" id="clip-btn">Save as activity</button>
+          <a class="btn small primary" href="${activityHash(a.id)}">Show full activity</a>
+        </div></div>` : ""}
       <div class="tiles">${tiles}</div>
       <div class="stack">
         ${a.track ? `<div class="card"><div id="map"></div></div>` : ""}
         <div class="card" id="charts-card"><h2><span>Data streams</span>
           ${a.series.time_s ? `<span class="seg" role="group" aria-label="X axis"><button data-x="distance">Distance</button><button data-x="time">Time</button></span>` : ""}</h2>
-          <div class="readout" id="readout"><span class="muted">Hover a chart to inspect values${a.track ? " and locate the point on the map" : ""}.</span></div>
+          <div class="readout" id="readout"><span class="muted">Hover a chart to inspect values${a.track ? " and locate the point on the map" : ""}. Drag across a chart to select a section.</span></div>
+          <div class="sel-bar" id="sel-bar" hidden></div>
           <div id="charts"></div>
         </div>
         <div class="grid two">
@@ -397,6 +449,7 @@
       await api(`/api/activities/${a.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sport: e.target.value }) });
       await loadList(); renderActivity(a.id);
     });
+    $("#clip-btn")?.addEventListener("click", () => saveClip(a, a.window));
     $("#del-btn").addEventListener("click", async () => {
       if (!confirm(`Delete “${a.name}”? This cannot be undone.`)) return;
       await api(`/api/activities/${a.id}`, { method: "DELETE" });
@@ -488,15 +541,70 @@
       chart.$synced = true; chart.$def = d;
       state.charts.push(chart);
       const canvas = chart.canvas;
-      const onMove = (clientX) => {
+      const idxAt = (clientX) => {
         const rect = canvas.getBoundingClientRect();
-        const xv = chart.scales.x.getValueForPixel(clientX - rect.left);
-        setHover(nearestIdx(xs, xv), a, xs, xMode);
+        return nearestIdx(xs, chart.scales.x.getValueForPixel(clientX - rect.left));
       };
-      canvas.addEventListener("mousemove", (e) => onMove(e.clientX));
-      canvas.addEventListener("touchmove", (e) => { if (e.touches[0]) { onMove(e.touches[0].clientX); } }, { passive: true });
-      canvas.addEventListener("mouseleave", () => setHover(null, a, xs, xMode));
+      // Drag to select a section; a plain click clears the selection.
+      canvas.addEventListener("mousedown", (e) => {
+        if (e.button !== 0) return;
+        e.preventDefault();
+        state.drag = { from: idxAt(e.clientX), moved: false };
+      });
+      canvas.addEventListener("mousemove", (e) => {
+        const i = idxAt(e.clientX);
+        if (state.drag && i !== state.drag.from) {
+          state.drag.moved = true;
+          state.sel = { i0: Math.min(state.drag.from, i), i1: Math.max(state.drag.from, i) };
+        }
+        setHover(i, a, xs, xMode);
+      });
+      canvas.addEventListener("touchmove", (e) => { if (e.touches[0]) setHover(idxAt(e.touches[0].clientX), a, xs, xMode); }, { passive: true });
+      canvas.addEventListener("mouseleave", () => { if (!state.drag) setHover(null, a, xs, xMode); });
     });
+    state.onDragEnd = () => {
+      if (!state.drag.moved) state.sel = null;
+      state.drag = null;
+      renderSelection(a);
+    };
+    renderSelection(a);
+  }
+
+  window.addEventListener("mouseup", () => { if (state.drag) state.onDragEnd?.(); });
+  window.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && state.sel && state.current) { state.sel = null; renderSelection(state.current); }
+  });
+
+  function renderSelection(a) {
+    state.charts.filter((c) => c.$synced).forEach((c) => c.draw());
+    const bar = $("#sel-bar");
+    if (!bar) return;
+    const se = a.series;
+    if (selLine) { selLine.remove(); selLine = null; }
+    const sel = state.sel;
+    if (!sel || se.idx[sel.i1] - se.idx[sel.i0] < 1) { bar.hidden = true; bar.innerHTML = ""; return; }
+    const w = { start: se.idx[sel.i0], end: se.idx[sel.i1] };
+    const dist = se.distance_m[sel.i1] - se.distance_m[sel.i0];
+    const dur = se.time_s ? se.time_s[sel.i1] - se.time_s[sel.i0] : null;
+    const from = se.time_s ? fmtDur(se.time_s[sel.i0]) : `${fmtDist(se.distance_m[sel.i0])} ${u().distL}`;
+    const to = se.time_s ? fmtDur(se.time_s[sel.i1]) : `${fmtDist(se.distance_m[sel.i1])} ${u().distL}`;
+    bar.hidden = false;
+    bar.innerHTML = `<div><strong>Selection</strong> ${fmtDist(dist)} ${u().distL}${dur != null ? ` · ${fmtDur(dur)}` : ""}
+        <span class="muted">(${from} → ${to})</span></div>
+      <div class="trim-actions">
+        <a class="btn small primary" href="${activityHash(a.id, w)}">View selection</a>
+        <span class="export-group"><span class="muted">Cut to new file</span>${exportLinks(a, w)}</span>
+        <button class="btn small" id="sel-save">Save as activity</button>
+        <button class="btn small ghost" id="sel-clear" title="Clear selection (Esc)">Clear</button>
+      </div>`;
+    $("#sel-save").addEventListener("click", () => saveClip(a, w));
+    $("#sel-clear").addEventListener("click", () => { state.sel = null; renderSelection(a); });
+    if (map && se.lat) {
+      const pts = [];
+      for (let k = sel.i0; k <= sel.i1; k++) if (se.lat[k] != null && se.lon[k] != null) pts.push([se.lat[k], se.lon[k]]);
+      if (pts.length > 1) selLine = L.polyline(pts, { color: css("--sel-edge"), weight: 6, opacity: 0.95 }).addTo(map);
+      hoverMarker?.bringToFront();
+    }
   }
 
   function nearestIdx(xs, v) {
@@ -561,8 +669,13 @@
 
   // ------------------------------------------------------------------ router
   function route() {
-    const m = location.hash.match(/^#\/activity\/(\d+)/);
-    if (m) renderActivity(Number(m[1])); else renderDashboard();
+    const m = location.hash.match(/^#\/activity\/(\d+)(?:\?(.*))?$/);
+    if (!m) { renderDashboard(); return; }
+    const q = new URLSearchParams(m[2] || "");
+    const start = Number(q.get("start")), end = Number(q.get("end"));
+    const win = q.has("start") && q.has("end") && Number.isInteger(start) && Number.isInteger(end) && end > start
+      ? { start, end } : null;
+    renderActivity(Number(m[1]), win);
   }
   window.addEventListener("hashchange", route);
   loadList().then(route).catch((e) => { main.innerHTML = `<div class="welcome"><h1>Cannot reach the server</h1><p class="muted">${esc(e.message)}</p></div>`; });

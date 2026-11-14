@@ -3,27 +3,39 @@ from __future__ import annotations
 
 import hashlib
 import os
+import re
 from collections import defaultdict
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Annotated
+from urllib.parse import quote
 
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from .analytics import activity_to_columns, analyse
+from . import writers
+from .analytics import activity_to_columns, analyse, cumulative_distance, point_count, window_columns
 from .parsers import ParseError, normalise_sport, parse_file
 from .storage import Store
 
 STATIC_DIR = Path(__file__).parent / "static"
 MAX_UPLOAD_BYTES = 100 * 1024 * 1024
 
+WindowStart = Annotated[int | None, Query(ge=0, description="first point index (inclusive)")]
+WindowEnd = Annotated[int | None, Query(ge=1, description="last point index (inclusive)")]
+
 
 class ActivityPatch(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=200)
     sport: str | None = Field(default=None, min_length=1, max_length=40)
+
+
+class ClipIn(BaseModel):
+    start: int | None = Field(default=None, ge=0)
+    end: int | None = Field(default=None, ge=1)
+    name: str | None = Field(default=None, min_length=1, max_length=200)
 
 
 class SettingsIn(BaseModel):
@@ -84,15 +96,84 @@ def create_app(db_path: str | None = None) -> FastAPI:
     def list_activities(sport: str | None = None):
         return store.list(sport)
 
-    @app.get("/api/activities/{activity_id}")
-    def get_activity(activity_id: int, split: str = Query("km", pattern="^(km|mi)$")):
+    def _get_row(activity_id: int) -> dict:
         row = store.get(activity_id)
         if not row:
             raise HTTPException(404, "activity not found")
-        result = _analyse_row(row, 1609.344 if split == "mi" else 1000.0)
+        return row
+
+    def _window(row: dict, start: int | None, end: int | None) -> tuple[dict, dict | None]:
+        """Return (columns, window-info). Without start/end the full activity is used."""
+        if start is None and end is None:
+            return row["points"], None
+        total = point_count(row["points"])
+        try:
+            cols = window_columns(row["points"], start, end)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        return cols, {"start": start or 0, "end": total - 1 if end is None else end, "total_points": total}
+
+    @app.get("/api/activities/{activity_id}")
+    def get_activity(activity_id: int, split: str = Query("km", pattern="^(km|mi)$"),
+                     start: WindowStart = None, end: WindowEnd = None):
+        """Full analysis. ``start``/``end`` give a temporary trimmed view (nothing is saved)."""
+        row = _get_row(activity_id)
+        cols, window = _window(row, start, end)
+        result = analyse(cols, row["sport"], store.get_settings(), 1609.344 if split == "mi" else 1000.0)
+        if window is None:
+            result["window"] = None
+        else:
+            offset = window["start"]
+            result["series"]["idx"] = [i + offset for i in result["series"]["idx"]]
+            result["window"] = window
         meta = {k: row[k] for k in ("id", "filename", "source_format", "device", "name", "sport",
                                     "start_time", "created_at")}
         return {**meta, **result}
+
+    @app.get("/api/activities/{activity_id}/export")
+    def export_activity(activity_id: int, format: str = Query("gpx", pattern="^(gpx|tcx|fit)$"),
+                        start: WindowStart = None, end: WindowEnd = None):
+        """Download the activity (or the trimmed window) as a new GPX/TCX/FIT file."""
+        row = _get_row(activity_id)
+        cols, window = _window(row, start, end)
+        cols = window_columns(cols) if window is None else cols  # always export cleaned points
+        name = row["name"] + (" (trimmed)" if window else "")
+        try:
+            if format == "gpx":
+                data = writers.to_gpx(cols, name, row["sport"])
+            else:
+                dist = cumulative_distance(cols)
+                writer = writers.to_tcx if format == "tcx" else writers.to_fit
+                data = writer(cols, name, row["sport"], dist)
+        except writers.ExportError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        stem = re.sub(r"[^\w\-]+", "_", name).strip("_") or "activity"
+        fname = f"{stem}.{format}"
+        disposition = f"attachment; filename=\"{fname.encode('ascii', 'replace').decode()}\"; " \
+                      f"filename*=UTF-8''{quote(fname)}"
+        return Response(data, media_type=writers.FORMATS[format],
+                        headers={"Content-Disposition": disposition})
+
+    @app.post("/api/activities/{activity_id}/clip", status_code=201)
+    def clip_activity(activity_id: int, body: ClipIn):
+        """Save the window ``start..end`` as a new, independent activity."""
+        row = _get_row(activity_id)
+        cols, window = _window(row, body.start, body.end)
+        if window is None:
+            raise HTTPException(422, "start or end required")
+        sha = hashlib.sha256(f"clip:{row['sha256']}:{window['start']}:{window['end']}".encode()).hexdigest()
+        if (existing := store.find_by_hash(sha)) is not None:
+            return {"id": existing, "duplicate": True}
+        try:
+            result = analyse(cols, row["sport"], store.get_settings())
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        name = body.name or f"{row['name']} (clip)"
+        new_id = store.add(
+            sha256=sha, filename=row["filename"], source_format=row["source_format"], device=row["device"],
+            name=name, sport=row["sport"], summary=_stored_summary(result), points=cols,
+        )
+        return {"id": new_id, "duplicate": False, "name": name}
 
     @app.patch("/api/activities/{activity_id}")
     def patch_activity(activity_id: int, patch: ActivityPatch):
