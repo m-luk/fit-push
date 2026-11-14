@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>fit-git</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <a href="#/" class="brand" aria-label="Dashboard">
+      <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true"><path d="M3 17l5-6 4 4 4-7 5 9" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      fit-git
+    </a>
+    <div class="topbar-actions">
+      <div class="seg" role="group" aria-label="Units">
+        <button data-units="metric">km</button><button data-units="imperial">mi</button>
+      </div>
+      <button class="btn ghost" id="theme-btn" title="Toggle theme" aria-label="Toggle theme">◐</button>
+      <button class="btn ghost" id="settings-btn">Settings</button>
+      <label class="btn primary">Upload
+        <input type="file" id="file-input" multiple accept=".gpx,.tcx,.fit,.gz" hidden>
+      </label>
+    </div>
+  </header>
+
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="dropzone" id="dropzone">
+        <strong>Drop files here</strong>
+        <span>.fit · .gpx · .tcx (also .gz)</span>
+      </div>
+      <div class="filter-row">
+        <select id="sport-filter" aria-label="Filter by sport"><option value="">All sports</option></select>
+        <span class="muted" id="count"></span>
+      </div>
+      <ul class="activity-list" id="activity-list"></ul>
+    </aside>
+    <main id="main"></main>
+  </div>
+
+  <dialog id="settings-dialog">
+    <form method="dialog" id="settings-form">
+      <h2>Athlete settings</h2>
+      <p class="muted">Used for heart-rate zones, TRIMP, intensity factor and TSS.</p>
+      <label>Max heart rate <input type="number" name="max_hr" min="100" max="250" required> bpm</label>
+      <label>Resting heart rate <input type="number" name="rest_hr" min="25" max="120" required> bpm</label>
+      <label>FTP <input type="number" name="ftp" min="50" max="600" required> W</label>
+      <div class="dialog-actions">
+        <button value="cancel" class="btn ghost" formnovalidate>Cancel</button>
+        <button value="save" class="btn primary">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <script src="/static/app.js"></script>
+</body>
+</html>
