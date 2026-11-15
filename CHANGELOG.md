@@ -8,6 +8,8 @@ How to update it: see "Changelog" in `AGENTS.md`.
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-11-15
+
 ### Fixed
 
 - Unrealistic max speeds (e.g. 80–200 km/h on a city bike ride), mostly with watches using
@@ -73,5 +75,6 @@ How to update it: see "Changelog" in `AGENTS.md`.
 - Pages and static files are served with `Cache-Control: no-cache`, so a normal refresh
   picks up a new version.
 
-[Unreleased]: https://github.com/m-luk/fit-push/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/m-luk/fit-push/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/m-luk/fit-push/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/m-luk/fit-push/releases/tag/v0.3.0
