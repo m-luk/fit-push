@@ -1,0 +1,12 @@
+{
+  "id": "gear",
+  "name": "Gear",
+  "version": "0.1.0",
+  "summary": "Track shoes, bikes and other gear: usage totals, limits and default gear per sport or sport group",
+  "owner": { "github": "m-luk" },
+  "maintainers": [],
+  "sdk": "1",
+  "provides": ["page", "activity-card", "api", "events"],
+  "depends": [],
+  "enabled_by_default": true
+}

@@ -7,3 +7,4 @@ Modules installed in this repository (SDK 1.0). Each row comes from the module's
 | Id | Name | Version | Owner | Summary | Provides | Manual |
 |---|---|---|---|---|---|---|
 | [activity_map](activity_map/README.md) | All activities map | 1.0.0 | [@m-luk](https://github.com/m-luk) | One big map with all your routes, filtered by sport, tag and date, coloured by sport or date | page, api | [manual](activity_map/MANUAL.md) |
+| [gear](gear/README.md) | Gear | 0.1.0 | [@m-luk](https://github.com/m-luk) | Track shoes, bikes and other gear: usage totals, limits and default gear per sport or sport group | page, activity-card, api, events | [manual](gear/MANUAL.md) |
