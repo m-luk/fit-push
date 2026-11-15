@@ -16,6 +16,7 @@ Backend (`/api/m/gear/...`):
 
 - `GET /gear`: gear items with usage totals (activities, distance including the
   starting distance, moving time, last use), default rules, kinds and sport groups.
+- `GET /items`: the items only, without totals (cheap; used by the activity header line).
 - `POST /gear`, `PATCH /gear/{id}`, `DELETE /gear/{id}`: manage items (name, kind,
   notes, starting distance, distance limit, retired).
 - `PUT /gear/{id}/defaults` `{targets: ["sport:running", "family:cycling", ...]}`: the

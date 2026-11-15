@@ -2,6 +2,7 @@
 
 Endpoints (under /api/m/gear):
     GET    /gear                      items with totals, defaults, kinds, sport groups
+    GET    /items                     items only (cheap; for pickers)
     POST   /gear                      add an item
     PATCH  /gear/{id}                 change an item (name, kind, notes, start_m, limit_m, retired)
     DELETE /gear/{id}                 remove an item (and its uses and defaults)
@@ -148,8 +149,11 @@ def register(ctx: ModuleContext) -> None:
 
     # ---- services for other modules (importers) --------------------------------------
     def svc_ensure(name: str, kind: str = "other", notes: str = "") -> int:
-        """Id of the item called ``name`` (case-insensitive, any kind); created when missing."""
-        name = name.strip()
+        """Id of the item called ``name`` (case-insensitive, any kind); created when missing.
+        Raises Invalid for an empty name; names are cut to 100 characters."""
+        name = " ".join(str(name).split())[:100]
+        if not name:
+            raise Invalid("gear name is empty")
         rows = ctx.db.query(f"SELECT id FROM {items_t} WHERE lower(name) = lower(?) ORDER BY id", (name,))
         if rows:
             return rows[0]["id"]
@@ -230,6 +234,12 @@ def register(ctx: ModuleContext) -> None:
             "no_gear": no_gear,
         }
 
+    @ctx.router.get("/items")
+    def list_items() -> list[dict]:
+        """Gear items only (no usage totals): cheap, for pickers."""
+        rows = ctx.db.query(f"SELECT * FROM {items_t} ORDER BY retired, kind, name COLLATE NOCASE")
+        return [{**g, "retired": bool(g["retired"])} for g in rows]
+
     @ctx.router.post("/gear", status_code=201)
     def add_gear(body: GearIn) -> dict:
         now = datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -243,6 +253,7 @@ def register(ctx: ModuleContext) -> None:
     def edit_gear(gear_id: int, body: GearPatch) -> dict:
         g = item(gear_id)
         changes = body.model_dump(exclude_unset=True)
+        changes = {k: v for k, v in changes.items() if v is not None or k == "limit_m"}
         if "kind" in changes:
             check_kind(changes["kind"])
         if changes.get("limit_m") == 0:
@@ -255,10 +266,9 @@ def register(ctx: ModuleContext) -> None:
         for key, value in changes.items():
             ctx.db.execute(f"UPDATE {items_t} SET {key} = ? WHERE id = ?", (value, gear_id))
         if changes.get("kind", g["kind"]) != g["kind"]:
-            targets = [
-                d["target"] for d in ctx.db.query(f"SELECT target FROM {defaults_t} WHERE gear_id = ?", (gear_id,))
-            ]
-            set_defaults(gear_id, TargetsIn(targets=targets))
+            # the item's defaults follow it to the new kind, but never take another item's slot
+            ctx.db.execute(f"UPDATE OR IGNORE {defaults_t} SET kind = ? WHERE gear_id = ?", (changes["kind"], gear_id))
+            ctx.db.execute(f"DELETE FROM {defaults_t} WHERE gear_id = ? AND kind != ?", (gear_id, changes["kind"]))
         return item(gear_id)
 
     @ctx.router.delete("/gear/{gear_id}", status_code=204)

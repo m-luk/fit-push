@@ -52,6 +52,10 @@
         data = d;
         if (list) {
           noGear = list;
+          if (sportFilter && !list.some((a) => a.sport === sportFilter)) {
+            sportFilter = "";
+            if (view === "nogear") ctx.setParams({ view, sport: null });
+          }
           const ids = new Set(list.map((a) => a.id));
           picked = new Set([...picked].filter((id) => ids.has(id)));
         }
@@ -221,6 +225,7 @@
         const targets = [...f.querySelectorAll("[name=target]:checked")].map((c) => c.value);
         try {
           const g = id === "new" ? await send("/gear", "POST", body) : await send(`/gear/${id}`, "PATCH", body);
+          if (id === "new") { editing = g.id; f.dataset.form = String(g.id); } // a retry must not add it twice
           await send(`/gear/${g.id}/defaults`, "PUT", { targets });
           editing = null;
           sdk.toast(id === "new" ? `Added ${body.name}` : `Saved ${body.name}`);
@@ -316,14 +321,14 @@
     placement: "header",
     async render(el, ctx) {
       const aid = ctx.activity.id;
-      let [list, mine] = await Promise.all([send("/gear", "GET"), send(`/activity/${aid}`, "GET")]);
-      if (!list.gear.length) return false;
+      let [items, mine] = await Promise.all([send("/items", "GET"), send(`/activity/${aid}`, "GET")]);
+      if (!items.length) return false;
       let choosing = false;
 
       function draw() {
         if (choosing) {
           const have = new Set(mine.gear.map((g) => g.id));
-          const opts = list.gear.filter((g) => !g.retired || have.has(g.id));
+          const opts = items.filter((g) => !g.retired || have.has(g.id));
           el.innerHTML = `<form class="gr-line gr-choose">${opts.map((g) => `<label class="gr-check">
               <input type="checkbox" name="gear" value="${g.id}"${have.has(g.id) ? " checked" : ""}> ${kindIcon(g.kind)} ${esc(g.name)}${g.retired ? ' <span class="muted gr-small">(retired)</span>' : ""}</label>`).join("")}
             <button type="submit" class="btn primary small">Save</button>

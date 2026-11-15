@@ -75,6 +75,9 @@ def test_kind_change_moves_defaults(make_client):
     client.put(f"{API}/gear/{a}/defaults", json={"targets": ["family:cycling"]})
     client.put(f"{API}/gear/{b}/defaults", json={"targets": ["family:cycling"]})
     client.patch(f"{API}/gear/{a}", json={"kind": "bike"})
+    items = _items(client)  # a kind change alone never takes another item's slot
+    assert (items[a]["defaults"], items[b]["defaults"]) == ([], ["family:cycling"])
+    client.put(f"{API}/gear/{a}/defaults", json={"targets": ["family:cycling"]})  # ticking it does
     items = _items(client)
     assert (items[a]["defaults"], items[b]["defaults"]) == (["family:cycling"], [])
 
@@ -165,3 +168,36 @@ def test_unassigned_list_and_batch_assign(make_client):
     assert client.post(f"{API}/assign", json={"gear_id": 999, "activity_ids": [run]}).status_code == 404
     assert client.post(f"{API}/assign", json={"gear_id": shoes, "activity_ids": [run, 999]}).status_code == 404
     assert client.post(f"{API}/assign", json={"gear_id": shoes, "activity_ids": []}).status_code == 422
+
+
+def test_review_regressions(make_client):
+    client = make_client(modules="gear")
+    a = _gear(client, "A", "shoes")
+    b = _gear(client, "B", "bike")
+    client.put(f"{API}/gear/{a}/defaults", json={"targets": ["sport:running"]})
+    client.put(f"{API}/gear/{b}/defaults", json={"targets": ["sport:running", "sport:hiking"]})
+    # changing B to shoes must not take A's running slot; its free hiking default follows it
+    client.patch(f"{API}/gear/{b}", json={"kind": "shoes"})
+    items = _items(client)
+    assert items[a]["defaults"] == ["sport:running"] and items[b]["defaults"] == ["sport:hiking"]
+
+    # explicit nulls are ignored instead of failing or un-retiring
+    client.patch(f"{API}/gear/{a}", json={"retired": True})
+    r = client.patch(f"{API}/gear/{a}", json={"name": None, "notes": None, "retired": None, "start_m": None})
+    assert r.status_code == 200 and r.json()["name"] == "A" and r.json()["retired"] == 1
+
+    # the light item list
+    assert {g["name"] for g in client.get(f"{API}/items").json()} == {"A", "B"}
+
+    # ensure: names are normalised and validated
+    from app.sdk import Invalid
+
+    ensure = client.app.state.module_services["gear"]["ensure"]
+    long_id = ensure("x" * 150, "bike")
+    assert _items(client)[long_id]["name"] == "x" * 100
+    assert ensure("  a  ") == a
+    try:
+        ensure("   ")
+        raise AssertionError("empty name accepted")
+    except Invalid:
+        pass
