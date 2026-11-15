@@ -8,6 +8,8 @@ How to update it: see "Changelog" in `AGENTS.md`.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-15
+
 ### Added
 
 - **Gear** module: a **No gear** view lists activities without gear (filterable by
@@ -62,4 +64,5 @@ How to update it: see "Changelog" in `AGENTS.md`.
 - Pages and static files are served with `Cache-Control: no-cache`, so a normal refresh
   picks up a new version.
 
-[Unreleased]: https://github.com/m-luk/fit-push/commits/HEAD
+[Unreleased]: https://github.com/m-luk/fit-push/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/m-luk/fit-push/releases/tag/v0.3.0
