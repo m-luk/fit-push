@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 from . import writers
 from .analytics import activity_to_columns, analyse, cumulative_distance, point_count, window_columns
 from .laps import detect_laps, lap_report
+from .segments import SegmentError, build_segment, effort_stats, find_efforts
 from .parsers import ParseError, normalise_sport, parse_file
 from .storage import Store
 
@@ -37,6 +38,17 @@ class ClipIn(BaseModel):
     start: int | None = Field(default=None, ge=0)
     end: int | None = Field(default=None, ge=1)
     name: str | None = Field(default=None, min_length=1, max_length=200)
+
+
+class SegmentIn(BaseModel):
+    activity_id: int
+    start: int = Field(ge=0)
+    end: int = Field(ge=1)
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+
+
+class SegmentPatch(BaseModel):
+    name: str = Field(min_length=1, max_length=200)
 
 
 class SettingsIn(BaseModel):
@@ -75,6 +87,20 @@ def create_app(db_path: str | None = None) -> FastAPI:
             lap_cache[key] = detect_laps(row["points"])
         return lap_cache[key]
 
+    # Segment matching: (segment, activity) pairs are re-matched whenever either side changes.
+    def _match(segment: dict, row: dict) -> int:
+        efforts = [{"start": i, "end": j, "stats": effort_stats(row["points"], i, j, row["sport"])}
+                   for i, j in find_efforts(segment, row["points"])]
+        store.set_efforts(segment["id"], row["id"], efforts)
+        return len(efforts)
+
+    def _match_activity(row: dict) -> None:
+        for seg in store.list_segments():
+            _match(seg, row)
+
+    def _match_segment(seg: dict) -> int:
+        return sum(_match(seg, store.get(aid)) for aid in store.all_ids())
+
     # ------------------------------------------------------------------ activities
     @app.post("/api/activities")
     async def upload(files: Annotated[list[UploadFile], File(...)]):
@@ -101,6 +127,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
                 sha256=sha, filename=fname, source_format=act.source_format, device=act.device,
                 name=act.name, sport=act.sport, summary=_stored_summary(result), points=cols,
             )
+            _match_activity({"id": new_id, "sport": act.sport, "points": cols})
             imported.append({"filename": fname, "id": new_id, "name": act.name, "sport": act.sport})
         return {"imported": imported, "duplicates": duplicates, "errors": errors}
 
@@ -140,6 +167,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
             result["window"] = window
         det = _detect(row)
         result["laps"] = None if det is None else {k: det[k] for k in ("count", "start", "end", "lap_distance_m")}
+        result["segment_efforts"] = store.efforts_for_activity(activity_id)
         meta = {k: row[k] for k in ("id", "filename", "source_format", "device", "name", "sport",
                                     "start_time", "created_at")}
         return {**meta, **result}
@@ -196,6 +224,7 @@ def create_app(db_path: str | None = None) -> FastAPI:
             sha256=sha, filename=row["filename"], source_format=row["source_format"], device=row["device"],
             name=name, sport=row["sport"], summary=_stored_summary(result), points=cols,
         )
+        _match_activity({"id": new_id, "sport": row["sport"], "points": cols})
         return {"id": new_id, "duplicate": False, "name": name}
 
     @app.patch("/api/activities/{activity_id}")
@@ -209,12 +238,77 @@ def create_app(db_path: str | None = None) -> FastAPI:
             fields["sport"] = row["sport"]
             fields["summary"] = _stored_summary(_analyse_row(row))
         store.update(activity_id, **fields)
+        if patch.sport:  # moving time depends on the sport
+            _match_activity(row)
         return store.get(activity_id, with_points=False)
 
     @app.delete("/api/activities/{activity_id}", status_code=204)
     def delete_activity(activity_id: int):
         if not store.delete(activity_id):
             raise HTTPException(404, "activity not found")
+
+    # ------------------------------------------------------------------ segments
+    def _get_segment(segment_id: int) -> dict:
+        seg = store.get_segment(segment_id)
+        if not seg:
+            raise HTTPException(404, "segment not found")
+        return seg
+
+    @app.post("/api/segments", status_code=201)
+    def create_segment(body: SegmentIn):
+        """Cut a segment from an activity (points start..end) and match it against every activity."""
+        row = _get_row(body.activity_id)
+        try:
+            geometry = build_segment(row["points"], body.start, body.end, row["sport"])
+        except (SegmentError, ValueError) as exc:
+            raise HTTPException(422, str(exc)) from exc
+        seg_id = store.add_segment(name=body.name or f"{row['name']} segment", sport=row["sport"],
+                                   source_activity_id=row["id"], geometry=geometry)
+        _match_segment(store.get_segment(seg_id))
+        return _segment_detail(seg_id)
+
+    @app.get("/api/segments")
+    def list_segments():
+        return [{k: v for k, v in s.items() if k != "points"} for s in store.list_segments()]
+
+    def _segment_detail(segment_id: int) -> dict:
+        seg = _get_segment(segment_id)
+        efforts = store.efforts_for_segment(segment_id)
+        by_activity: dict[int, dict] = {}
+        for e in efforts:  # efforts are ordered best first, so the first one per activity is its best
+            a = by_activity.setdefault(e["activity_id"], {
+                "activity_id": e["activity_id"], "name": e["activity_name"], "sport": e["activity_sport"],
+                "start_time": e["activity_start"], "efforts": 0, "best": e})
+            a["efforts"] += 1
+        activities = sorted(by_activity.values(), key=lambda a: a["start_time"] or "", reverse=True)
+        return {**seg, "efforts": efforts, "activities": activities}
+
+    @app.get("/api/segments/{segment_id}")
+    def get_segment(segment_id: int):
+        """Segment geometry, all efforts (best time first) and the activities that contain it."""
+        return _segment_detail(segment_id)
+
+    @app.patch("/api/segments/{segment_id}")
+    def rename_segment(segment_id: int, body: SegmentPatch):
+        _get_segment(segment_id)
+        store.rename_segment(segment_id, body.name)
+        return _segment_detail(segment_id)
+
+    @app.delete("/api/segments/{segment_id}", status_code=204)
+    def delete_segment(segment_id: int):
+        if not store.delete_segment(segment_id):
+            raise HTTPException(404, "segment not found")
+
+    @app.post("/api/segments/{segment_id}/rescan")
+    def rescan_segment(segment_id: int):
+        """Re-match the segment against every stored activity."""
+        _match_segment(_get_segment(segment_id))
+        return _segment_detail(segment_id)
+
+    @app.get("/api/activities/{activity_id}/segments")
+    def activity_segments(activity_id: int):
+        _get_row(activity_id)
+        return store.efforts_for_activity(activity_id)
 
     # ------------------------------------------------------------------ settings
     @app.get("/api/settings")

@@ -27,6 +27,26 @@ CREATE TABLE IF NOT EXISTS activities (
 );
 CREATE INDEX IF NOT EXISTS ix_activities_start ON activities(start_time);
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS segments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    sport TEXT NOT NULL,
+    source_activity_id INTEGER REFERENCES activities(id) ON DELETE SET NULL,
+    created_at TEXT NOT NULL,
+    geometry TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS segment_efforts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    segment_id INTEGER NOT NULL REFERENCES segments(id) ON DELETE CASCADE,
+    activity_id INTEGER NOT NULL REFERENCES activities(id) ON DELETE CASCADE,
+    start_idx INTEGER NOT NULL,
+    end_idx INTEGER NOT NULL,
+    elapsed_s REAL,
+    stats TEXT NOT NULL,
+    UNIQUE (segment_id, activity_id, start_idx)
+);
+CREATE INDEX IF NOT EXISTS ix_efforts_segment ON segment_efforts(segment_id, elapsed_s);
+CREATE INDEX IF NOT EXISTS ix_efforts_activity ON segment_efforts(activity_id);
 """
 
 LIST_COLUMNS = "id, filename, source_format, device, name, sport, start_time, created_at, summary"
@@ -40,6 +60,7 @@ class Store:
         self._conn = sqlite3.connect(self.path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._lock = threading.Lock()
+        self._conn.execute("PRAGMA foreign_keys = ON")
         with self._tx() as c:
             c.executescript(SCHEMA)
 
@@ -125,3 +146,72 @@ class Store:
                 c.execute("INSERT INTO settings (key, value) VALUES (?, ?) "
                           "ON CONFLICT(key) DO UPDATE SET value = excluded.value", (k, json.dumps(v)))
         return self.get_settings()
+
+    # ---------------------------------------------------------------- segments
+    @staticmethod
+    def _segment(row) -> dict:
+        d = dict(row)
+        d.update(json.loads(d.pop("geometry")))
+        return d
+
+    def add_segment(self, *, name: str, sport: str, source_activity_id: int, geometry: dict) -> int:
+        with self._tx() as c:
+            return c.execute(
+                "INSERT INTO segments (name, sport, source_activity_id, created_at, geometry) VALUES (?,?,?,?,?)",
+                (name, sport, source_activity_id, datetime.now(timezone.utc).isoformat(), json.dumps(geometry)),
+            ).lastrowid
+
+    def list_segments(self) -> list[dict]:
+        q = """SELECT s.*, COUNT(e.id) AS effort_count, COUNT(DISTINCT e.activity_id) AS activity_count,
+                      MIN(e.elapsed_s) AS best_s
+               FROM segments s LEFT JOIN segment_efforts e ON e.segment_id = s.id
+               GROUP BY s.id ORDER BY s.name COLLATE NOCASE"""
+        with self._tx() as c:
+            return [self._segment(r) for r in c.execute(q).fetchall()]
+
+    def get_segment(self, segment_id: int) -> dict | None:
+        with self._tx() as c:
+            r = c.execute("SELECT * FROM segments WHERE id = ?", (segment_id,)).fetchone()
+        return self._segment(r) if r else None
+
+    def rename_segment(self, segment_id: int, name: str) -> bool:
+        with self._tx() as c:
+            return c.execute("UPDATE segments SET name = ? WHERE id = ?", (name, segment_id)).rowcount > 0
+
+    def delete_segment(self, segment_id: int) -> bool:
+        with self._tx() as c:
+            return c.execute("DELETE FROM segments WHERE id = ?", (segment_id,)).rowcount > 0
+
+    def set_efforts(self, segment_id: int, activity_id: int, efforts: list[dict]) -> None:
+        """Replace the efforts of one activity on one segment."""
+        with self._tx() as c:
+            c.execute("DELETE FROM segment_efforts WHERE segment_id = ? AND activity_id = ?", (segment_id, activity_id))
+            c.executemany(
+                "INSERT INTO segment_efforts (segment_id, activity_id, start_idx, end_idx, elapsed_s, stats)"
+                " VALUES (?,?,?,?,?,?)",
+                [(segment_id, activity_id, e["start"], e["end"], e["stats"].get("elapsed_s"), json.dumps(e["stats"]))
+                 for e in efforts],
+            )
+
+    _EFFORT_SELECT = """
+        SELECT e.id, e.segment_id, e.activity_id, e.start_idx AS start, e.end_idx AS "end", e.stats,
+               s.name AS segment_name, a.name AS activity_name, a.sport AS activity_sport,
+               a.start_time AS activity_start,
+               RANK() OVER (PARTITION BY e.segment_id ORDER BY e.elapsed_s IS NULL, e.elapsed_s) AS rank,
+               COUNT(*) OVER (PARTITION BY e.segment_id) AS "of"
+        FROM segment_efforts e JOIN segments s ON s.id = e.segment_id JOIN activities a ON a.id = e.activity_id"""
+
+    def _efforts(self, where: str, arg) -> list[dict]:
+        q = f"SELECT * FROM ({self._EFFORT_SELECT}) WHERE {where} ORDER BY rank, start"
+        with self._tx() as c:
+            rows = [dict(r) for r in c.execute(q, (arg,)).fetchall()]
+        for r in rows:
+            r.update(json.loads(r.pop("stats")))
+        return rows
+
+    def efforts_for_segment(self, segment_id: int) -> list[dict]:
+        return self._efforts("segment_id = ?", segment_id)
+
+    def efforts_for_activity(self, activity_id: int) -> list[dict]:
+        rows = self._efforts("activity_id = ?", activity_id)
+        return sorted(rows, key=lambda r: r["start"])

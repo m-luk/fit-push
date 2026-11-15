@@ -79,6 +79,35 @@ last lap's end. It adds:
   scale is clipped to the 5th–95th percentile so a GPS spike can't flatten it,
   and a legend shows the range. With a section or lap selected, only that part
   stays coloured and the rest fades, so overlapping laps can be compared.
+- **Colours** picks the colour pattern: the default (blue, or blue–red for the
+  speed Δ), Rainbow, Turbo, Red hot, Viridis, Plasma, Cool–warm, Green → red or
+  Grayscale; **⇄ Reverse** flips it.
+- **✚ Pick section**: click the start, then the end of a stretch on the track to
+  select it (where the track passes a spot several times, the first pass after
+  the previous click is used).
+
+### Segments
+
+A segment is a stretch of track (start → end) whose times are compared across
+all activities. Select a stretch (drag across a chart, **✚ Pick section** on
+the map, or a lap in the laps view) and click **Create segment**; the same
+button in the page header turns the whole activity into a segment, and in the
+trimmed-view banner it uses the trimmed part.
+
+An activity has an *effort* on a segment when it passes within 25 m of the
+segment start, later within 25 m of its end, covers a similar distance in
+between (80–125 %), and stays on the segment's line (95 % of points within
+30 m, checked both ways, so shortcuts and detours don't count). Direction
+matters, and one activity can have several efforts, for example one per lap.
+New uploads are matched automatically; **Rescan activities** re-checks
+everything.
+
+- The **Segments** tab (sidebar) lists all segments; a segment page shows its
+  map, a **best efforts** leaderboard (fastest first) and the **activities**
+  that contain it. Each time links to that effort in its activity.
+- On an activity, the **Segments** card lists its efforts with their rank
+  (🏆 for the best time). Click a row to highlight the effort on the charts
+  and map, use **View** for a trimmed view, or follow the name to the segment.
 
 Across activities: totals, weekly or monthly trend charts (distance, time,
 elevation, training load, count), personal records per sport, and an all-time
@@ -128,6 +157,12 @@ once, and duplicate files are skipped by content hash.
 | `GET` | `/api/activities/{id}/export?format=gpx\|tcx\|fit&start=&end=` | download full activity or trimmed section as a new file |
 | `POST` | `/api/activities/{id}/clip` | `{start, end, name?}`: save section as new activity |
 | `GET` | `/api/activities/{id}/laps` | detected laps with per-lap, lapped-section and whole-activity summaries (404 if none) |
+| `GET` | `/api/activities/{id}/segments` | segment efforts in this activity, with rank |
+| `POST` | `/api/segments` | `{activity_id, start, end, name?}`: create a segment and match all activities |
+| `GET` | `/api/segments` | list with effort / activity counts and best time |
+| `GET` | `/api/segments/{id}` | geometry, efforts (fastest first) and activities containing it |
+| `PATCH` / `DELETE` | `/api/segments/{id}` | rename / delete (efforts are removed with it) |
+| `POST` | `/api/segments/{id}/rescan` | re-match against every stored activity |
 | `PATCH` | `/api/activities/{id}` | `{name, sport}` |
 | `DELETE` | `/api/activities/{id}` | delete |
 | `GET` | `/api/stats?sport=&period=week\|month` | totals, periods, records, all-time power curve |
@@ -153,6 +188,7 @@ app/
   analytics.py  numpy-based metrics, splits, zones, power curve, best efforts
   writers.py    GPX / TCX / FIT writers (export, cut to new file)
   laps.py       repeating-lap detection and per-lap summaries
+  segments.py   segment geometry and effort matching
   storage.py    SQLite (zlib-compressed point columns)
   main.py       FastAPI routes + static frontend
   static/       index.html, app.js (Chart.js + Leaflet), style.css

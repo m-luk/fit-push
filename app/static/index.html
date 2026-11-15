@@ -33,11 +33,20 @@
         <strong>Drop files here</strong>
         <span>.fit · .gpx · .tcx (also .gz)</span>
       </div>
-      <div class="filter-row">
-        <select id="sport-filter" aria-label="Filter by sport"><option value="">All sports</option></select>
-        <span class="muted" id="count"></span>
+      <nav class="seg side-tabs" aria-label="Sections">
+        <a href="#/" data-tab="activities">Activities</a><a href="#/segments" data-tab="segments">Segments</a>
+      </nav>
+      <div id="tab-activities" class="side-panel">
+        <div class="filter-row">
+          <select id="sport-filter" aria-label="Filter by sport"><option value="">All sports</option></select>
+          <span class="muted" id="count"></span>
+        </div>
+        <ul class="activity-list" id="activity-list"></ul>
       </div>
-      <ul class="activity-list" id="activity-list"></ul>
+      <div id="tab-segments" class="side-panel" hidden>
+        <div class="filter-row"><span class="muted" id="seg-count"></span></div>
+        <ul class="activity-list" id="segment-list"></ul>
+      </div>
     </aside>
     <main id="main"></main>
   </div>
@@ -52,6 +61,18 @@
       <div class="dialog-actions">
         <button value="cancel" class="btn ghost" formnovalidate>Cancel</button>
         <button value="save" class="btn primary">Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="name-dialog">
+    <form method="dialog" id="name-form">
+      <h2 id="name-title">Name</h2>
+      <p class="muted" id="name-hint"></p>
+      <label>Name <input type="text" name="name" maxlength="200" required></label>
+      <div class="dialog-actions">
+        <button value="cancel" class="btn ghost" formnovalidate>Cancel</button>
+        <button value="ok" class="btn primary" id="name-ok">Create</button>
       </div>
     </form>
   </dialog>

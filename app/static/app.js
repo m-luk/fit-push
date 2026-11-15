@@ -13,6 +13,12 @@
     period: "week",
     metric: "distance_m",
     overlay: lsGet("overlay") || "none",
+    palette: lsGet("palette") || "default",
+    paletteReverse: lsGet("paletteReverse") === "1",
+    selListeners: [], // called after every selection change (laps view, segments card)
+    effort: null,     // selected segment effort {id, name, range}
+    segments: [],
+    pick: null,       // map "pick start/end" mode
     lap: null,        // selected lap number in the laps view
     lapRange: null,   // its series range, to notice when the selection moves elsewhere
   };
@@ -90,7 +96,7 @@
     document.querySelectorAll("[data-units]").forEach((b) => b.classList.toggle("active", b.dataset.units === state.units));
   }
   document.querySelectorAll("[data-units]").forEach((b) => b.addEventListener("click", () => {
-    state.units = b.dataset.units; lsSet("units", state.units); syncUnitButtons(); renderList(); route();
+    state.units = b.dataset.units; lsSet("units", state.units); syncUnitButtons(); renderList(); renderSegList(); route();
   }));
   syncUnitButtons();
 
@@ -108,7 +114,7 @@
       if (r.duplicates.length) parts.push(`${r.duplicates.length} already present`);
       if (r.errors.length) parts.push(`${r.errors.length} failed: ${r.errors.map((e) => `${e.filename} (${e.error})`).join(", ")}`);
       toast(parts.join(" · ") || "Nothing imported");
-      await loadList();
+      await Promise.all([loadList(), loadSegments()]);
       if (r.imported.length === 1) location.hash = `#/activity/${r.imported[0].id}`;
       else route();
     } catch (e) { toast("Upload failed: " + e.message); }
@@ -358,9 +364,24 @@
         : `<a class="btn small" href="/api/activities/${a.id}/export?format=${f}${windowQuery(w)}" download>${f.toUpperCase()}</a>`;
     }).join("");
   }
+  // In-page replacement for prompt() (which some embedded browsers block). Resolves to null on cancel.
+  function askName(title, hint, def, okLabel) {
+    const dlg = $("#name-dialog"), input = $("#name-form").elements.name;
+    $("#name-title").textContent = title;
+    $("#name-hint").textContent = hint;
+    $("#name-ok").textContent = okLabel;
+    input.value = def;
+    dlg.returnValue = "";
+    return new Promise((resolve) => {
+      dlg.addEventListener("close", () => resolve(dlg.returnValue === "ok" ? (input.value.trim() || def) : null), { once: true });
+      dlg.showModal();
+      input.select();
+    });
+  }
+
   async function saveClip(a, w, suggested) {
     const def = suggested || `${a.name} (clip)`;
-    const name = prompt("Name for the new activity:", def);
+    const name = await askName("Save as activity", "The selected stretch becomes a new, separate activity.", def, "Save");
     if (name === null) return;
     try {
       const r = await api(`/api/activities/${a.id}/clip`, {
@@ -375,7 +396,8 @@
 
   async function renderActivity(id, win, opts = {}) {
     destroyCharts();
-    state.sel = null; state.lap = null; state.lapRange = null; state.onSelChange = null;
+    state.sel = null; state.lap = null; state.lapRange = null; state.effort = null; state.selListeners = [];
+    endPick();
     main.innerHTML = `<div class="spinner">Analysing…</div>`;
     let a, laps = null;
     try {
@@ -385,6 +407,8 @@
     } catch (e) { main.innerHTML = `<div class="welcome"><h1>Not found</h1><p class="muted">${esc(e.message)}</p><a href="#/">Back to dashboard</a></div>`; return; }
     state.current = a; renderList();
     const lapsMode = !!(laps && a.window);
+    // Segment efforts inside the current view (indices are absolute, like the window).
+    const efforts = (a.segment_efforts || []).filter((e) => !a.window || (e.start >= a.window.start && e.end <= a.window.end));
     const s = a.summary;
     const pace = PACE_SPORTS.has(a.sport);
     const sportOpts = ["running", "cycling", "walking", "hiking", "swimming", "unknown"];
@@ -417,6 +441,7 @@
         </div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
           ${a.window ? "" : `<span class="export-group" aria-label="Export full activity"><span class="muted">Export</span>${exportLinks(a, null)}</span>`}
+          ${a.track && !a.window ? `<button class="btn" id="seg-act-btn" title="Make the whole activity a segment and find it in all activities">Create segment</button>` : ""}
           <select id="sport-sel" aria-label="Sport">${sportOpts.map((o) => `<option value="${esc(o)}" ${o === a.sport ? "selected" : ""}>${esc(sportName(o))}</option>`).join("")}</select>
           <button class="btn danger" id="del-btn">Delete</button>
         </div>
@@ -430,6 +455,7 @@
         <div class="trim-actions">
           <span class="export-group"><span class="muted">Cut to new file</span>${exportLinks(a, a.window)}</span>
           <button class="btn small" id="clip-btn">Save as activity</button>
+          ${a.track ? `<button class="btn small" id="seg-act-btn" title="Make this ${lapsMode ? "laps section" : "trimmed view"} a segment and find it in all activities">Create segment</button>` : ""}
           <a class="btn small primary" href="${activityHash(a.id)}">Show full activity</a>
         </div></div>` : ""}
       <div class="tiles">${tiles}</div>
@@ -439,12 +465,21 @@
           ${lapsMode ? `<div class="card"><h2><span>Lap times</span><span class="muted" style="font-weight:400">click a lap to select it</span></h2><div class="chart-wrap lap-chart-wrap"><canvas id="lap-chart"></canvas></div></div>` : ""}
           ${a.track ? `<div class="map-slot"><div class="card map-card" id="map-card">
             <div class="map-head">
-              <label class="ov-label">Colour track by <select id="ov-sel"></select></label>
-              <button class="btn small" id="map-size" aria-pressed="false" title="Enlarge map">⤢ Enlarge</button>
+              <span class="ov-controls">
+                <label class="ov-label">Colour track by <select id="ov-sel"></select></label>
+                <label class="ov-label" id="pal-wrap">Colours <select id="pal-sel">${Object.entries(PALETTES).map(([k, p]) => `<option value="${k}" ${k === state.palette ? "selected" : ""}>${esc(p.label)}</option>`).join("")}</select></label>
+                <button class="btn small" id="pal-rev" aria-pressed="${state.paletteReverse}" title="Reverse the colour order">⇄ Reverse</button>
+              </span>
+              <span class="ov-controls">
+                <button class="btn small" id="map-pick" aria-pressed="false" title="Click the start, then the end of a section on the track">✚ Pick section</button>
+                <button class="btn small" id="map-size" aria-pressed="false" title="Enlarge map">⤢ Enlarge</button>
+              </span>
             </div>
             <div id="map"></div></div></div>` : ""}
         </div>` : ""}
         ${lapsMode ? `<div class="card"><h2><span>Laps</span><span class="muted" style="font-weight:400">click a row, then ↑/↓ to step through</span></h2><div class="table-scroll lap-list" id="lap-list"></div></div>` : ""}
+        ${efforts.length ? `<div class="card" id="seg-card"><h2><span>Segments</span><span class="muted" style="font-weight:400">${efforts.length} effort${efforts.length === 1 ? "" : "s"} · click a row to show it</span></h2>
+          <div class="table-scroll lap-list" id="seg-list">${segEffortsTable(a, efforts)}</div></div>` : ""}
         <div class="card" id="charts-card"><h2><span>Data streams</span>
           ${a.series.time_s ? `<span class="seg" role="group" aria-label="X axis"><button data-x="distance">Distance</button><button data-x="time">Time</button></span>` : ""}</h2>
           <div class="readout" id="readout"><span class="muted">Hover a chart to inspect values${a.track ? " and locate the point on the map" : ""}. Drag across a chart to select a section.</span></div>
@@ -471,10 +506,12 @@
       await loadList(); renderActivity(a.id);
     });
     $("#clip-btn")?.addEventListener("click", () => saveClip(a, a.window));
+    $("#seg-act-btn")?.addEventListener("click", () =>
+      createSegment(a, a.window || { start: 0, end: a.summary.points - 1 }, a.window ? `${a.name} (part)` : a.name));
     $("#del-btn").addEventListener("click", async () => {
       if (!confirm(`Delete “${a.name}”? This cannot be undone.`)) return;
       await api(`/api/activities/${a.id}`, { method: "DELETE" });
-      toast("Activity deleted"); await loadList(); location.hash = "#/";
+      toast("Activity deleted"); await Promise.all([loadList(), loadSegments()]); location.hash = "#/";
     });
 
     if (a.track) drawMap(a, lapsMode ? laps : null);
@@ -489,6 +526,126 @@
     setX(xMode);
     if (a.power_curve?.length) powerCurveChart($("#pc"), a.power_curve, false);
     if (lapsMode) renderLaps(a, laps);
+    if (efforts.length) wireSegEfforts(a, efforts);
+    if (opts.effort) {
+      const e = efforts.find((x) => x.id === opts.effort);
+      if (e) { selectEffort(a, e); $("#seg-card")?.scrollIntoView({ block: "center" }); }
+      else toast("That segment effort is not in this view");
+    }
+  }
+
+  // ------------------------------------------------------------------ segments on an activity
+  function segEffortsTable(a, efforts) {
+    const pace = PACE_SPORTS.has(a.sport);
+    const has = (k) => efforts.some((e) => e[k] != null);
+    return `<table><thead><tr><th>Segment</th><th>Time</th><th>${pace ? "Pace" : "Speed"}</th>${has("avg_hr") ? "<th>Avg HR</th>" : ""}${has("avg_power") ? "<th>Power</th>" : ""}<th>Rank</th><th></th></tr></thead><tbody>
+      ${efforts.map((e) => `<tr data-effort="${e.id}" tabindex="0" aria-selected="false">
+        <td class="name-cell"><a href="#/segment/${e.segment_id}" title="Open segment">${esc(e.segment_name)}</a></td>
+        <td>${fmtDur(e.elapsed_s)}</td>
+        <td>${e.speed_ms == null ? "–" : pace ? `${fmtPace(e.speed_ms)} /${u().distL}` : `${fmtSpeed(e.speed_ms)} ${u().speedL}`}</td>
+        ${has("avg_hr") ? `<td>${fmtNum(e.avg_hr, 0)}</td>` : ""}${has("avg_power") ? `<td>${fmtNum(e.avg_power, 0)}</td>` : ""}
+        <td>${rankBadge(e)}</td>
+        <td><a class="btn small" href="${activityHash(a.id, e)}" title="Trimmed view of this effort">View</a></td></tr>`).join("")}
+      </tbody></table>`;
+  }
+  const rankBadge = (e) => (e.rank === 1 ? `<span class="badge pr">🏆 Best</span>` : `<span class="muted">${e.rank} / ${e.of}</span>`);
+
+  function selectEffort(a, e) {
+    const idx = a.series.idx;
+    state.sel = { i0: nearestIdx(idx, e.start), i1: nearestIdx(idx, e.end) };
+    state.lap = null; state.lapRange = null;
+    state.effort = { id: e.id, name: e.segment_name, range: { ...state.sel } };
+    renderSelection(a);
+  }
+
+  function wireSegEfforts(a, efforts) {
+    const list = $("#seg-list");
+    const pick = (id) => {
+      if (state.effort?.id === id) { state.sel = null; renderSelection(a); return; }
+      selectEffort(a, efforts.find((e) => e.id === id));
+    };
+    list.addEventListener("click", (ev) => {
+      if (ev.target.closest("a")) return; // links navigate
+      const tr = ev.target.closest("tr[data-effort]");
+      if (tr) pick(Number(tr.dataset.effort));
+    });
+    list.addEventListener("keydown", (ev) => {
+      const tr = ev.target.closest("tr[data-effort]");
+      if (tr && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); pick(Number(tr.dataset.effort)); }
+    });
+    state.selListeners.push(() => list.querySelectorAll("tr[data-effort]").forEach((tr) =>
+      tr.setAttribute("aria-selected", String(Number(tr.dataset.effort) === state.effort?.id))));
+  }
+
+  async function createSegment(a, w, suggested) {
+    const def = suggested || (state.lap ? `${a.name} lap` : `${a.name} segment`);
+    const name = await askName("Create segment", "All activities that follow this stretch, now and later, get an effort on it.", def, "Create");
+    if (name === null) return;
+    toast("Creating segment and searching all activities…");
+    try {
+      const s = await api("/api/segments", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ activity_id: a.id, start: w.start, end: w.end, name: name.trim() || def }),
+      });
+      toast(`Segment created — ${s.efforts.length} effort${s.efforts.length === 1 ? "" : "s"} in ${s.activities.length} activit${s.activities.length === 1 ? "y" : "ies"}`);
+      await loadSegments();
+      location.hash = `#/segment/${s.id}`;
+    } catch (e) { toast("Could not create segment: " + e.message); }
+  }
+
+  // Map "pick section": click the start, then the end on the track.
+  function nearestOnTrack(se, latlng, after = -1) {
+    const p = map.latLngToContainerPoint(latlng);
+    const cand = [];
+    let best = Infinity;
+    for (let k = after + 1; k < se.lat.length; k++) {
+      if (se.lat[k] == null || se.lon[k] == null) continue;
+      const q = map.latLngToContainerPoint([se.lat[k], se.lon[k]]);
+      const d = Math.hypot(p.x - q.x, p.y - q.y);
+      cand.push([k, d]);
+      best = Math.min(best, d);
+    }
+    if (best > 25) return null; // pixels: the click must be on (or right next to) the track
+    // Where the track passes the spot several times (laps), take the first pass.
+    return cand.find(([, d]) => d <= best + 6)[0];
+  }
+
+  function startPick(a) {
+    if (state.pick) { endPick(); return; }
+    state.sel = null; renderSelection(a);
+    state.pick = { a, i0: null, marker: null };
+    $("#map-pick").setAttribute("aria-pressed", "true");
+    $("#map").classList.add("picking");
+    toast("Click the START of the section on the track");
+    map.on("click", onPickClick);
+  }
+
+  function onPickClick(ev) {
+    const pk = state.pick;
+    if (!pk) return;
+    const se = pk.a.series;
+    const k = nearestOnTrack(se, ev.latlng, pk.i0 ?? -1);
+    if (k == null) { toast(pk.i0 == null ? "Click on the track to set the start" : "Click on the track, after the start, to set the end"); return; }
+    if (pk.i0 == null) {
+      pk.i0 = k;
+      pk.marker = L.circleMarker([se.lat[k], se.lon[k]], { radius: 7, color: css("--surface-1"), weight: 2, fillColor: css("--sel-edge"), fillOpacity: 1 }).addTo(map);
+      toast("Now click the END of the section");
+      return;
+    }
+    const a = pk.a, i0 = pk.i0;
+    endPick();
+    state.sel = { i0, i1: k };
+    renderSelection(a);
+    $("#sel-bar")?.scrollIntoView({ block: "nearest" });
+  }
+
+  function endPick() {
+    if (!state.pick) return;
+    state.pick.marker?.remove();
+    state.pick = null;
+    if (map) map.off("click", onPickClick);
+    $("#map-pick")?.setAttribute("aria-pressed", "false");
+    $("#map")?.classList.remove("picking");
   }
 
   // ------------------------------------------------------------------ map
@@ -520,7 +677,14 @@
     sel.innerHTML = `<option value="none">Nothing (route only)</option>` +
       defs.map((d) => `<option value="${d.key}" ${d.key === state.overlay ? "selected" : ""}>${esc(d.label)}</option>`).join("");
     sel.addEventListener("change", () => { state.overlay = sel.value; lsSet("overlay", sel.value); drawOverlay(a); });
+    $("#pal-sel").addEventListener("change", (e) => { state.palette = e.target.value; lsSet("palette", state.palette); drawOverlay(a); });
+    $("#pal-rev").addEventListener("click", (e) => {
+      state.paletteReverse = !state.paletteReverse; lsSet("paletteReverse", state.paletteReverse ? "1" : "0");
+      e.currentTarget.setAttribute("aria-pressed", String(state.paletteReverse)); drawOverlay(a);
+    });
     $("#map-size").addEventListener("click", () => setMapExpanded(!$("#map-card").classList.contains("expanded")));
+    $("#map-pick").addEventListener("click", () => startPick(a));
+    if (new URLSearchParams(location.search).has("debug")) window.__fitgitMap = map; // for UI tests
     drawOverlay(a);
   }
 
@@ -538,6 +702,34 @@
     if (on) map.scrollWheelZoom.enable(); else map.scrollWheelZoom.disable();
     map.invalidateSize({ animate: false });
     map.fitBounds(selLine ? selLine.getBounds() : trackBounds, { padding: [30, 30] });
+  }
+
+  // Colour patterns for the track overlay (stops low -> high). "default" uses the theme tokens:
+  // one-hue blue for magnitudes and blue <-> gray <-> red for the speed delta.
+  const PALETTES = {
+    default: { label: "Default (blue / blue–red)" },
+    rainbow: { label: "Rainbow", stops: ["#2b00ff", "#0080ff", "#00e0ff", "#00e060", "#c0f000", "#ffb000", "#ff2000"] },
+    turbo: { label: "Turbo", stops: ["#30123b", "#4662d7", "#36aaf9", "#1ae4b6", "#72fe5e", "#c7ef34", "#fabb36", "#f66b19", "#ca2a04", "#7a0403"] },
+    hot: { label: "Red hot", stops: ["#1a0000", "#600000", "#b00000", "#ff2000", "#ff8000", "#ffd000", "#ffff80", "#ffffff"] },
+    viridis: { label: "Viridis", stops: ["#440154", "#482878", "#3e4989", "#31688e", "#26828e", "#1f9e89", "#35b779", "#6ece58", "#b5de2b", "#fde725"] },
+    plasma: { label: "Plasma", stops: ["#0d0887", "#46039f", "#7201a8", "#9c179e", "#bd3786", "#d8576b", "#ed7953", "#fb9f3a", "#fdca26", "#f0f921"] },
+    coolwarm: { label: "Cool–warm", stops: ["#3b4cc0", "#7092f3", "#aac7fd", "#dddddd", "#f7b89c", "#e7745b", "#b40426"] },
+    traffic: { label: "Green → red", stops: ["#1a9850", "#91cf60", "#d9ef8b", "#fee08b", "#fc8d59", "#d73027"] },
+    gray: { label: "Grayscale", stops: ["#f2f2f2", "#bdbdbd", "#878787", "#525252", "#1a1a1a"] },
+  };
+  const hexRgb = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
+  function sampleStops(stops, n) {
+    const rgb = stops.map(hexRgb);
+    return Array.from({ length: n }, (_, k) => {
+      const p = (k / (n - 1)) * (rgb.length - 1), i = Math.min(Math.floor(p), rgb.length - 2), f = p - i;
+      return "#" + rgb[i].map((c, j) => Math.round(c + (rgb[i + 1][j] - c) * f).toString(16).padStart(2, "0")).join("");
+    });
+  }
+  function paletteSteps(diverging) {
+    const pal = PALETTES[state.palette] || PALETTES.default;
+    const steps = pal.stops ? sampleStops(pal.stops, 12)
+      : Array.from({ length: 7 }, (_, i) => css(`--${diverging ? "dv" : "ov"}-${i + 1}`));
+    return state.paletteReverse ? steps.reverse() : steps;
   }
 
   function quantile(sorted, q) {
@@ -574,6 +766,7 @@
     overlayLayer.clearLayers();
     const def = overlayDefs(a).find((d) => d.key === state.overlay);
     const legend = legendCtl.getContainer();
+    for (const id of ["#pal-wrap", "#pal-rev"]) { const el = $(id); if (el) el.hidden = !def; }
     if (!def) {
       baseLine.setStyle({ opacity: 0.9 });
       legend.hidden = true;
@@ -581,7 +774,7 @@
       return;
     }
     baseLine.setStyle({ opacity: 0 });
-    const steps = Array.from({ length: 7 }, (_, i) => css(`--${def.diverging ? "dv" : "ov"}-${i + 1}`));
+    const steps = paletteSteps(def.diverging);
     const vals = def.values.filter((v) => v != null).sort((x, y) => x - y);
     let lo, hi;
     if (def.diverging) { // symmetric around 0 so the gray middle step means "average"
@@ -737,17 +930,25 @@
   window.addEventListener("mouseup", () => { if (state.drag) state.onDragEnd?.(); });
   window.addEventListener("keydown", (e) => {
     if (e.key !== "Escape") return;
+    if (state.pick) { endPick(); return; }
     if ($("#map-card.expanded")) { setMapExpanded(false); return; }
     if (state.sel && state.current) { state.sel = null; renderSelection(state.current); }
   });
 
   function renderSelection(a) {
     const sel = state.sel;
-    // A drag or Clear replaces a selected lap.
-    if (state.lap && !(sel && state.lapRange && sel.i0 === state.lapRange.i0 && sel.i1 === state.lapRange.i1)) {
-      state.lap = null; state.lapRange = null;
-    }
-    try { drawSelection(a, sel); } finally { state.onSelChange?.(); }
+    const same = (r) => sel && r && sel.i0 === r.i0 && sel.i1 === r.i1;
+    // A drag or Clear replaces a selected lap / segment effort.
+    if (state.lap && !same(state.lapRange)) { state.lap = null; state.lapRange = null; }
+    if (state.effort && !same(state.effort.range)) state.effort = null;
+    try { drawSelection(a, sel); } finally { state.selListeners.forEach((f) => f()); }
+  }
+
+  // Label of the current selection: a lap, a segment effort, or a free selection.
+  function selectionLabel(a) {
+    if (state.lap) return { title: `Lap ${state.lap}`, noun: "lap", name: `${a.name} – lap ${state.lap}` };
+    if (state.effort) return { title: `Segment “${state.effort.name}”`, noun: "effort", name: `${a.name} – ${state.effort.name}` };
+    return { title: "Selection", noun: "selection", name: undefined };
   }
 
   function drawSelection(a, sel) {
@@ -764,16 +965,18 @@
     const from = se.time_s ? fmtDur(se.time_s[sel.i0]) : `${fmtDist(se.distance_m[sel.i0])} ${u().distL}`;
     const to = se.time_s ? fmtDur(se.time_s[sel.i1]) : `${fmtDist(se.distance_m[sel.i1])} ${u().distL}`;
     bar.hidden = false;
-    bar.innerHTML = `<div><strong>${state.lap ? `Lap ${state.lap}` : "Selection"}</strong> ${fmtDist(dist)} ${u().distL}${dur != null ? ` · ${fmtDur(dur)}` : ""}
+    const lbl = selectionLabel(a);
+    bar.innerHTML = `<div><strong>${esc(lbl.title)}</strong> ${fmtDist(dist)} ${u().distL}${dur != null ? ` · ${fmtDur(dur)}` : ""}
         <span class="muted">(${from} → ${to})</span></div>
       <div class="trim-actions">
-        <a class="btn small primary" href="${activityHash(a.id, w)}">View ${state.lap ? "lap" : "selection"}</a>
+        <a class="btn small primary" href="${activityHash(a.id, w)}">View ${lbl.noun}</a>
         <span class="export-group"><span class="muted">Cut to new file</span>${exportLinks(a, w)}</span>
         <button class="btn small" id="sel-save">Save as activity</button>
+        ${se.lat && !state.effort ? `<button class="btn small" id="sel-segment" title="Make this stretch a segment and find it in all activities">Create segment</button>` : ""}
         <button class="btn small ghost" id="sel-clear" title="Clear selection (Esc)">Clear</button>
       </div>`;
-    const lapName = state.lap ? `${a.name} – lap ${state.lap}` : undefined;
-    $("#sel-save").addEventListener("click", () => saveClip(a, w, lapName));
+    $("#sel-save").addEventListener("click", () => saveClip(a, w, lbl.name));
+    $("#sel-segment")?.addEventListener("click", () => createSegment(a, w));
     $("#sel-clear").addEventListener("click", () => { state.sel = null; renderSelection(a); });
     if (map && se.lat) {
       const pts = [];
@@ -945,7 +1148,7 @@
       const row = list.querySelector(`tr[data-lap="${k}"]`);
       row?.scrollIntoView({ block: "nearest" });
     }
-    state.onSelChange = refresh;
+    state.selListeners.push(refresh);
     refresh();
   }
 
@@ -977,17 +1180,158 @@
       </tbody></table></div>`;
   }
 
+  // ------------------------------------------------------------------ segments pages
+  async function loadSegments() {
+    state.segments = await api("/api/segments");
+    renderSegList();
+  }
+
+  function renderSegList() {
+    const items = state.segments;
+    $("#seg-count").textContent = `${items.length} segment${items.length === 1 ? "" : "s"}`;
+    const ul = $("#segment-list");
+    if (!items.length) { ul.innerHTML = `<li class="empty">No segments yet.</li>`; return; }
+    ul.innerHTML = items.map((s) => {
+      const bits = [`${fmtDist(s.distance_m)} ${u().distL}`, `${s.effort_count} effort${s.effort_count === 1 ? "" : "s"}`];
+      if (s.best_s != null) bits.push(`best ${fmtDur(s.best_s)}`);
+      return `<li><a href="#/segment/${s.id}" class="${s.id === state.currentSegment ? "active" : ""}">
+        <span class="icon" aria-hidden="true">${sportIcon(s.sport)}</span>
+        <span class="name">${esc(s.name)}</span><span class="meta">${esc(bits.join(" · "))}</span></a></li>`;
+    }).join("");
+  }
+
+  function setTab(tab) {
+    document.querySelectorAll("[data-tab]").forEach((t) => t.classList.toggle("active", t.dataset.tab === tab));
+    $("#tab-activities").hidden = tab !== "activities";
+    $("#tab-segments").hidden = tab !== "segments";
+  }
+
+  function leaveActivity() {
+    destroyCharts(); endPick();
+    if (map) { map.remove(); map = null; }
+    state.current = null; state.sel = null; state.selListeners = [];
+  }
+
+  async function renderSegmentsPage() {
+    leaveActivity(); state.currentSegment = null;
+    await loadSegments(); renderList();
+    const segs = state.segments;
+    main.innerHTML = `
+      <div class="page-head"><div><h1>Segments</h1>
+        <div class="sub">Stretches of track compared across all your activities</div></div></div>
+      ${segs.length ? `<div class="card"><div class="table-scroll"><table class="seg-overview"><thead><tr><th>Segment</th><th>Sport</th><th>Distance</th><th>Elev +</th><th>Efforts</th><th>Activities</th><th>Best time</th></tr></thead><tbody>
+        ${segs.map((s) => `<tr><td class="name-cell"><a href="#/segment/${s.id}">${esc(s.name)}</a></td><td>${sportIcon(s.sport)} ${esc(sportName(s.sport))}</td>
+          <td>${fmtDist(s.distance_m)} ${u().distL}</td><td>${fmtEle(s.elev_gain_m)} ${u().eleL}</td><td>${s.effort_count}</td><td>${s.activity_count}</td><td>${fmtDur(s.best_s)}</td></tr>`).join("")}
+        </tbody></table></div></div>` : ""}
+      <div class="card how-to"><h2>Creating a segment</h2>
+        <ol>
+          <li>Open an activity.</li>
+          <li>Select the stretch: drag across any chart, click <b>✚ Pick section</b> on the map and click its start and end on the track, or pick a lap in the laps view.</li>
+          <li>Click <b>Create segment</b> in the selection bar.</li>
+        </ol>
+        <p class="muted">Every activity, stored or uploaded later, that follows the same line from the segment start to its end gets an effort on it, so you can compare times. Several passes in one activity (laps) count as separate efforts.</p></div>`;
+  }
+
+  async function renderSegment(id) {
+    leaveActivity(); renderList();
+    main.innerHTML = `<div class="spinner">Loading segment…</div>`;
+    let s;
+    try { s = await api(`/api/segments/${id}`); }
+    catch (e) { main.innerHTML = `<div class="welcome"><h1>Segment not found</h1><p class="muted">${esc(e.message)}</p><a href="#/segments">All segments</a></div>`; return; }
+    state.currentSegment = s.id;
+    renderSegList();
+    const pace = PACE_SPORTS.has(s.sport);
+    const speedTxt = (ms) => (ms == null ? "–" : pace ? `${fmtPace(ms)} /${u().distL}` : `${fmtSpeed(ms)} ${u().speedL}`);
+    const best = s.efforts[0];
+    const effortHref = (e) => `#/activity/${e.activity_id}?effort=${e.id}`;
+    const has = (k) => s.efforts.some((e) => e[k] != null);
+    main.innerHTML = `
+      <div class="page-head">
+        <div style="flex:1;min-width:240px">
+          <input class="title-input" id="seg-name" value="${esc(s.name)}" aria-label="Segment name" maxlength="200">
+          <div class="sub">${sportIcon(s.sport)} Segment · ${esc(sportName(s.sport))} · ${s.source_activity_id ? `cut from <a href="#/activity/${s.source_activity_id}">this activity</a>` : "source activity deleted"}</div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <button class="btn" id="seg-rescan" title="Search all stored activities again">Rescan activities</button>
+          <button class="btn danger" id="seg-del">Delete</button>
+        </div>
+      </div>
+      <div class="tiles">
+        ${tile("Distance", fmtDist(s.distance_m), u().distL)}
+        ${s.elev_gain_m != null ? tile("Elevation gain", fmtEle(s.elev_gain_m), u().eleL) : ""}
+        ${tile("Efforts", fmtNum(s.efforts.length, 0))}
+        ${tile("Activities", fmtNum(s.activities.length, 0))}
+        ${best ? tile("Best time", fmtDur(best.elapsed_s)) : ""}
+        ${best?.speed_ms ? (pace ? tile("Best pace", fmtPace(best.speed_ms), "/" + u().distL) : tile("Best speed", fmtSpeed(best.speed_ms), u().speedL)) : ""}
+      </div>
+      <div class="grid two">
+        <div class="card"><div id="map" class="seg-map"></div></div>
+        <div class="card"><h2><span>Best efforts</span><span class="muted" style="font-weight:400">fastest first</span></h2>
+          ${s.efforts.length ? `<div class="table-scroll lap-list"><table><thead><tr><th>#</th><th>Time</th><th>${pace ? "Pace" : "Speed"}</th>${has("avg_hr") ? "<th>Avg HR</th>" : ""}${has("avg_power") ? "<th>Power</th>" : ""}<th>Date</th><th>Activity</th></tr></thead><tbody>
+            ${s.efforts.map((e) => `<tr><td>${e.rank === 1 ? "🏆" : e.rank}</td><td><a href="${effortHref(e)}" title="Show this effort in the activity">${fmtDur(e.elapsed_s)}</a></td><td>${speedTxt(e.speed_ms)}</td>
+              ${has("avg_hr") ? `<td>${fmtNum(e.avg_hr, 0)}</td>` : ""}${has("avg_power") ? `<td>${fmtNum(e.avg_power, 0)}</td>` : ""}
+              <td>${esc(fmtDay(e.start_time || e.activity_start))}</td><td class="name-cell"><a href="${effortHref(e)}">${esc(e.activity_name)}</a></td></tr>`).join("")}
+            </tbody></table></div>` : `<p class="muted">No efforts yet. Activities that follow this line will appear here.</p>`}
+        </div>
+      </div>
+      <div class="card"><h2><span>Activities with this segment</span><span class="muted" style="font-weight:400">newest first</span></h2>
+        ${s.activities.length ? `<div class="table-scroll"><table><thead><tr><th>Date</th><th>Activity</th><th>Sport</th><th>Efforts</th><th>Best time</th><th>Rank</th></tr></thead><tbody>
+          ${s.activities.map((x) => `<tr><td>${esc(fmtDay(x.start_time))}</td><td class="name-cell"><a href="#/activity/${x.activity_id}">${esc(x.name)}</a></td>
+            <td>${sportIcon(x.sport)} ${esc(sportName(x.sport))}</td><td>${x.efforts}</td>
+            <td><a href="${effortHref(x.best)}" title="Show the best effort in the activity">${fmtDur(x.best.elapsed_s)}</a></td><td>${rankBadge(x.best)}</td></tr>`).join("")}
+          </tbody></table></div>` : `<p class="muted">None yet.</p>`}
+      </div>`;
+
+    map = L.map("map", { scrollWheelZoom: false, preferCanvas: true });
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    }).addTo(map);
+    L.polyline(s.points, { color: css("--map-casing"), weight: 8, interactive: false }).addTo(map);
+    const line = L.polyline(s.points, { color: css("--sel-edge"), weight: 5, interactive: false }).addTo(map);
+    map.fitBounds(line.getBounds(), { padding: [24, 24] });
+    const dot = (ll, color, label) => L.circleMarker(ll, { radius: 7, color: css("--surface-1"), weight: 2, fillColor: color, fillOpacity: 1 }).addTo(map).bindTooltip(label);
+    dot(s.points[0], css("--m-elevation"), "Segment start");
+    dot(s.points.at(-1), css("--text-primary"), "Segment end");
+
+    $("#seg-name").addEventListener("change", async (e) => {
+      const name = e.target.value.trim();
+      if (!name) { e.target.value = s.name; return; }
+      await api(`/api/segments/${s.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) });
+      s.name = name; toast("Renamed"); loadSegments();
+    });
+    $("#seg-name").addEventListener("keydown", (e) => { if (e.key === "Enter") e.target.blur(); });
+    $("#seg-rescan").addEventListener("click", async () => {
+      toast("Searching all activities…");
+      const r = await api(`/api/segments/${s.id}/rescan`, { method: "POST" });
+      toast(`${r.efforts.length} effort${r.efforts.length === 1 ? "" : "s"} found`);
+      await loadSegments(); renderSegment(s.id);
+    });
+    $("#seg-del").addEventListener("click", async () => {
+      if (!confirm(`Delete segment “${s.name}”? Its efforts are removed too; activities are not touched.`)) return;
+      await api(`/api/segments/${s.id}`, { method: "DELETE" });
+      toast("Segment deleted"); await loadSegments(); location.hash = "#/segments";
+    });
+  }
+
   // ------------------------------------------------------------------ router
   function route() {
     document.body.classList.remove("map-open");
-    const m =location.hash.match(/^#\/activity\/(\d+)(?:\?(.*))?$/);
+    if (location.hash.startsWith("#/segment")) {
+      setTab("segments");
+      const sm = location.hash.match(/^#\/segment\/(\d+)/);
+      if (sm) renderSegment(Number(sm[1])); else renderSegmentsPage();
+      return;
+    }
+    setTab("activities");
+    state.currentSegment = null;
+    const m = location.hash.match(/^#\/activity\/(\d+)(?:\?(.*))?$/);
     if (!m) { renderDashboard(); return; }
     const q = new URLSearchParams(m[2] || "");
     const start = Number(q.get("start")), end = Number(q.get("end"));
     const win = q.has("start") && q.has("end") && Number.isInteger(start) && Number.isInteger(end) && end > start
       ? { start, end } : null;
-    renderActivity(Number(m[1]), win, { laps: q.get("laps") === "1" });
+    renderActivity(Number(m[1]), win, { laps: q.get("laps") === "1", effort: q.has("effort") ? Number(q.get("effort")) : null });
   }
   window.addEventListener("hashchange", route);
-  loadList().then(route).catch((e) => { main.innerHTML = `<div class="welcome"><h1>Cannot reach the server</h1><p class="muted">${esc(e.message)}</p></div>`; });
+  Promise.all([loadList(), loadSegments()]).then(route).catch((e) => { main.innerHTML = `<div class="welcome"><h1>Cannot reach the server</h1><p class="muted">${esc(e.message)}</p></div>`; });
 })();

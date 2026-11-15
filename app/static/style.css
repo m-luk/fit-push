@@ -225,6 +225,9 @@ table.cmp .sel-col { background: var(--sel-fill); }
 
 /* ---- map card: overlay picker, enlarge, legend ---- */
 .map-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.ov-controls { display: flex; align-items: center; gap: 8px 14px; flex-wrap: wrap; }
+.ov-controls [hidden] { display: none; }
+.btn[aria-pressed="true"] { background: color-mix(in srgb, var(--accent) 14%, var(--surface-1)); border-color: var(--accent); }
 .ov-label { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-secondary); }
 .map-card.expanded {
   position: fixed; inset: 12px; z-index: 2000; display: flex; flex-direction: column;
@@ -246,3 +249,22 @@ body.map-open { overflow: hidden; }
 .lg-note { margin-top: 4px; font-size: 11px; }
 .lg-labels { display: flex; justify-content: space-between; gap: 8px; margin-top: 4px; font-variant-numeric: tabular-nums; }
 @media (max-width: 640px) { .map-card.expanded { inset: 0; border-radius: 0; } }
+/* ---- sidebar tabs & segments ---- */
+.side-tabs { display: flex; }
+.side-tabs a { flex: 1; text-align: center; text-decoration: none; color: var(--text-secondary); }
+.side-tabs a.active { color: var(--text-primary); }
+.side-panel { display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+.side-panel[hidden] { display: none; }
+.seg-map { height: 380px; border-radius: 8px; z-index: 0; }
+#map.picking, #map.picking .leaflet-interactive { cursor: crosshair; }
+.badge.pr { border-color: var(--m-temp); }
+td.name-cell { text-align: left; max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
+#seg-list tr[data-effort] { cursor: pointer; }
+#seg-list tr[data-effort]:hover td { background: var(--surface-2); }
+#seg-list tr[data-effort]:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+#seg-list tr[aria-selected="true"] td { background: var(--sel-fill); }
+#seg-list tr[aria-selected="true"] td:first-child { box-shadow: inset 3px 0 0 var(--sel-edge); }
+.how-to ol { margin: 0 0 8px; padding-left: 20px; line-height: 1.6; }
+.how-to p { margin: 0; }
+.side-tabs a { padding: 6px 10px; }
+.side-tabs a.active { background: var(--surface-2); font-weight: 600; }
