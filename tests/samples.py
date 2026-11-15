@@ -1,4 +1,5 @@
 """Synthetic activity generators (GPX, TCX and binary FIT) for tests and demos."""
+
 from __future__ import annotations
 
 import math
@@ -19,16 +20,20 @@ def synthetic_track(seconds=1800, speed=3.0, pause=(600, 660), start=START, with
     for i in range(seconds + 1):
         if i > 0 and not (pause[0] <= i < pause[1]):
             dist += speed
-        pts.append({
-            "t": start + timedelta(seconds=i),
-            "lat": LAT0 + dist / M_PER_DEG_LAT,
-            "lon": LON0,
-            "ele": 100 + 20 * math.sin(dist / 1000.0),
-            "hr": 120 + min(50, i / 30),
-            "cad": 0 if pause[0] <= i < pause[1] else 85,
-            "power": (200 + 50 * math.sin(i / 60)) if with_power and not (pause[0] <= i < pause[1]) else (0 if with_power else None),
-            "dist": dist,
-        })
+        pts.append(
+            {
+                "t": start + timedelta(seconds=i),
+                "lat": LAT0 + dist / M_PER_DEG_LAT,
+                "lon": LON0,
+                "ele": 100 + 20 * math.sin(dist / 1000.0),
+                "hr": 120 + min(50, i / 30),
+                "cad": 0 if pause[0] <= i < pause[1] else 85,
+                "power": (200 + 50 * math.sin(i / 60))
+                if with_power and not (pause[0] <= i < pause[1])
+                else (0 if with_power else None),
+                "dist": dist,
+            }
+        )
     return pts
 
 
@@ -55,6 +60,7 @@ def lap_track(laps=8, warmup=600.0, cooldown=400.0, lap_speeds=None, noise=2.5, 
     ``lap_speeds`` (m/s per lap) defaults to a gently varying 4.0-4.4 m/s.
     """
     import random
+
     rnd = random.Random(seed)
     lap_speeds = lap_speeds or [4.2 + 0.2 * math.sin(k) for k in range(laps)]
     gate = _stadium(0.0)
@@ -80,16 +86,18 @@ def lap_track(laps=8, warmup=600.0, cooldown=400.0, lap_speeds=None, noise=2.5, 
         nx, ny = rho * nx + rnd.gauss(0, kick), rho * ny + rnd.gauss(0, kick)
         x += nx
         y += ny
-        pts.append({
-            "t": start + timedelta(seconds=i),
-            "lat": LAT0 + y / M_PER_DEG_LAT,
-            "lon": LON0 + x / (M_PER_DEG_LAT * math.cos(math.radians(LAT0))),
-            "ele": 100.0,
-            "hr": 130 + (20 if lap is not None else 0) + 0.01 * i,
-            "cad": 88,
-            "power": None,
-            "dist": dist,
-        })
+        pts.append(
+            {
+                "t": start + timedelta(seconds=i),
+                "lat": LAT0 + y / M_PER_DEG_LAT,
+                "lon": LON0 + x / (M_PER_DEG_LAT * math.cos(math.radians(LAT0))),
+                "ele": 100.0,
+                "hr": 130 + (20 if lap is not None else 0) + 0.01 * i,
+                "cad": 88,
+                "power": None,
+                "dist": dist,
+            }
+        )
         dist += speed
         i += 1
     return pts
@@ -100,30 +108,33 @@ def to_gpx(pts, name="Morning Run", sport="running") -> bytes:
     for p in pts:
         rows.append(
             f'<trkpt lat="{p["lat"]:.7f}" lon="{p["lon"]:.7f}"><ele>{p["ele"]:.1f}</ele>'
-            f'<time>{p["t"].strftime("%Y-%m-%dT%H:%M:%SZ")}</time><extensions><gpxtpx:TrackPointExtension>'
-            f'<gpxtpx:hr>{int(p["hr"])}</gpxtpx:hr><gpxtpx:cad>{int(p["cad"])}</gpxtpx:cad>'
-            f'</gpxtpx:TrackPointExtension></extensions></trkpt>'
+            f"<time>{p['t'].strftime('%Y-%m-%dT%H:%M:%SZ')}</time><extensions><gpxtpx:TrackPointExtension>"
+            f"<gpxtpx:hr>{int(p['hr'])}</gpxtpx:hr><gpxtpx:cad>{int(p['cad'])}</gpxtpx:cad>"
+            f"</gpxtpx:TrackPointExtension></extensions></trkpt>"
         )
     return (
         '<?xml version="1.0" encoding="UTF-8"?>\n'
         '<gpx version="1.1" creator="test" xmlns="http://www.topografix.com/GPX/1/1" '
         'xmlns:gpxtpx="http://www.garmin.com/xmlschemas/TrackPointExtension/v1">'
-        f'<trk><name>{name}</name><type>{sport}</type><trkseg>{"".join(rows)}</trkseg></trk></gpx>'
+        f"<trk><name>{name}</name><type>{sport}</type><trkseg>{''.join(rows)}</trkseg></trk></gpx>"
     ).encode()
 
 
 def to_tcx(pts, sport="Biking") -> bytes:
     rows = []
     for p in pts:
-        watts = f'<Extensions><ns3:TPX><ns3:Watts>{int(p["power"])}</ns3:Watts></ns3:TPX></Extensions>' \
-            if p.get("power") is not None else ""
+        watts = (
+            f"<Extensions><ns3:TPX><ns3:Watts>{int(p['power'])}</ns3:Watts></ns3:TPX></Extensions>"
+            if p.get("power") is not None
+            else ""
+        )
         rows.append(
-            f'<Trackpoint><Time>{p["t"].strftime("%Y-%m-%dT%H:%M:%S.000Z")}</Time>'
-            f'<Position><LatitudeDegrees>{p["lat"]:.7f}</LatitudeDegrees>'
-            f'<LongitudeDegrees>{p["lon"]:.7f}</LongitudeDegrees></Position>'
-            f'<AltitudeMeters>{p["ele"]:.1f}</AltitudeMeters><DistanceMeters>{p["dist"]:.1f}</DistanceMeters>'
-            f'<HeartRateBpm><Value>{int(p["hr"])}</Value></HeartRateBpm><Cadence>{int(p["cad"])}</Cadence>'
-            f'{watts}</Trackpoint>'
+            f"<Trackpoint><Time>{p['t'].strftime('%Y-%m-%dT%H:%M:%S.000Z')}</Time>"
+            f"<Position><LatitudeDegrees>{p['lat']:.7f}</LatitudeDegrees>"
+            f"<LongitudeDegrees>{p['lon']:.7f}</LongitudeDegrees></Position>"
+            f"<AltitudeMeters>{p['ele']:.1f}</AltitudeMeters><DistanceMeters>{p['dist']:.1f}</DistanceMeters>"
+            f"<HeartRateBpm><Value>{int(p['hr'])}</Value></HeartRateBpm><Cadence>{int(p['cad'])}</Cadence>"
+            f"{watts}</Trackpoint>"
         )
     return (
         '<?xml version="1.0" encoding="UTF-8"?>'
@@ -131,14 +142,30 @@ def to_tcx(pts, sport="Biking") -> bytes:
         'xmlns:ns3="http://www.garmin.com/xmlschemas/ActivityExtension/v2">'
         f'<Activities><Activity Sport="{sport}"><Id>{pts[0]["t"].isoformat()}</Id>'
         f'<Lap StartTime="{pts[0]["t"].isoformat()}"><Track>{"".join(rows)}</Track></Lap>'
-        '<Creator><Name>Test Device</Name></Creator></Activity></Activities></TrainingCenterDatabase>'
+        "<Creator><Name>Test Device</Name></Creator></Activity></Activities></TrainingCenterDatabase>"
     ).encode()
 
 
 # ----------------------------------------------------------------------------- FIT writer
 
-_CRC_TABLE = [0x0000, 0xCC01, 0xD801, 0x1400, 0xF001, 0x3C00, 0x2800, 0xE401,
-              0xA001, 0x6C00, 0x7800, 0xB401, 0x5000, 0x9C01, 0x8801, 0x4400]
+_CRC_TABLE = [
+    0x0000,
+    0xCC01,
+    0xD801,
+    0x1400,
+    0xF001,
+    0x3C00,
+    0x2800,
+    0xE401,
+    0xA001,
+    0x6C00,
+    0x7800,
+    0xB401,
+    0x5000,
+    0x9C01,
+    0x8801,
+    0x4400,
+]
 FIT_EPOCH = 631065600  # 1989-12-31T00:00:00Z
 
 
@@ -169,18 +196,33 @@ def to_fit(pts, sport: int = 1, sub_sport: int = 0) -> bytes:
     body += _definition(0, 0, [(0, 1, 0x00), (1, 2, 0x84), (2, 2, 0x84), (4, 4, 0x86)])
     body += struct.pack("<BBHHI", 0, 4, 1, 1, _fit_ts(pts[0]["t"]))
     # record: timestamp, lat, long, altitude, hr, cadence, distance, speed, power
-    rec_fields = [(253, 4, 0x86), (0, 4, 0x85), (1, 4, 0x85), (2, 2, 0x84), (3, 1, 0x02),
-                  (4, 1, 0x02), (5, 4, 0x86), (6, 2, 0x84), (7, 2, 0x84)]
+    rec_fields = [
+        (253, 4, 0x86),
+        (0, 4, 0x85),
+        (1, 4, 0x85),
+        (2, 2, 0x84),
+        (3, 1, 0x02),
+        (4, 1, 0x02),
+        (5, 4, 0x86),
+        (6, 2, 0x84),
+        (7, 2, 0x84),
+    ]
     body += _definition(1, 20, rec_fields)
     prev = None
     for p in pts:
         speed = 0.0 if prev is None else p["dist"] - prev["dist"]
         power = p.get("power")
         body += struct.pack(
-            "<BIiiHBBIHH", 1, _fit_ts(p["t"]),
-            round(p["lat"] / 180.0 * 2**31), round(p["lon"] / 180.0 * 2**31),
-            round((p["ele"] + 500) * 5), int(p["hr"]), int(p["cad"]),
-            round(p["dist"] * 100), round(speed * 1000),
+            "<BIiiHBBIHH",
+            1,
+            _fit_ts(p["t"]),
+            round(p["lat"] / 180.0 * 2**31),
+            round(p["lon"] / 180.0 * 2**31),
+            round((p["ele"] + 500) * 5),
+            int(p["hr"]),
+            int(p["cad"]),
+            round(p["dist"] * 100),
+            round(speed * 1000),
             0xFFFF if power is None else int(power),  # 0xFFFF = invalid
         )
         prev = p

@@ -20,6 +20,7 @@
         <button data-units="metric">km</button><button data-units="imperial">mi</button>
       </div>
       <button class="btn ghost" id="theme-btn" title="Toggle theme" aria-label="Toggle theme">◐</button>
+      <a class="btn ghost" href="#/modules" title="Optional modules, their owners and manuals">Modules</a>
       <button class="btn ghost" id="settings-btn">Settings</button>
       <label class="btn primary">Upload
         <input type="file" id="file-input" multiple accept=".gpx,.tcx,.fit,.gz" hidden>
@@ -39,6 +40,7 @@
       <div id="tab-activities" class="side-panel">
         <div class="filter-row">
           <select id="sport-filter" aria-label="Filter by sport"><option value="">All sports</option></select>
+          <select id="tag-filter" aria-label="Filter by tag" hidden><option value="">All tags</option></select>
           <span class="muted" id="count"></span>
         </div>
         <ul class="activity-list" id="activity-list"></ul>

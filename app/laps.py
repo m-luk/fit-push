@@ -8,15 +8,18 @@ agree. Warm-up before the first pass and cool-down after the last are left out.
 
 All indices refer to the cleaned point sequence (see ``analytics.window_columns``).
 """
+
 from __future__ import annotations
+
+import itertools
 
 import numpy as np
 
 from .analytics import _distance, _prepare, analyse, window_columns
 
-MIN_LAP_M = 150.0          # shorter "laps" are GPS jitter around the gate
+MIN_LAP_M = 150.0  # shorter "laps" are GPS jitter around the gate
 MIN_LAPS = 2
-LENGTH_TOLERANCE = 0.12    # each lap within ±12 % of the median lap length
+LENGTH_TOLERANCE = 0.12  # each lap within ±12 % of the median lap length
 CANDIDATES = 240
 SHAPE_SAMPLES = 48
 MAX_GRID = 20_000
@@ -38,7 +41,7 @@ def _passes(dd: np.ndarray, g: np.ndarray, radius: float) -> np.ndarray:
     starts, ends = np.flatnonzero(edges == 1), np.flatnonzero(edges == -1)
     passes: list[int] = []
     for s, e in zip(starts, ends):
-        k = s + int(np.argmin(dd[s:e]))
+        k = int(s + np.argmin(dd[s:e]))
         if passes and g[k] - g[passes[-1]] < MIN_LAP_M:
             if dd[k] < dd[passes[-1]]:  # same visit (GPS wobble): keep the closer point
                 passes[-1] = k
@@ -50,7 +53,7 @@ def _passes(dd: np.ndarray, g: np.ndarray, radius: float) -> np.ndarray:
 def _longest_run(ok: np.ndarray) -> tuple[int, int]:
     """[start, end) of the longest run of True values."""
     best, cur_start, best_rng = 0, None, (0, 0)
-    for i, v in enumerate(list(ok) + [False]):
+    for i, v in enumerate([*list(ok), False]):
         if v and cur_start is None:
             cur_start = i
         elif not v and cur_start is not None:
@@ -83,11 +86,14 @@ def _evaluate(passes, g, xs, ys, heading_step):
 
     # Shape check: resample every lap by fraction of its length and compare to the median lap.
     frac = np.linspace(0, 1, SHAPE_SAMPLES)
-    shapes = np.stack([
-        np.stack([np.interp(g[a] + frac * (g[b] - g[a]), g, xs),
-                  np.interp(g[a] + frac * (g[b] - g[a]), g, ys)], axis=1)
-        for a, b in zip(passes[:-1], passes[1:])
-    ])
+    shapes = np.stack(
+        [
+            np.stack(
+                [np.interp(g[a] + frac * (g[b] - g[a]), g, xs), np.interp(g[a] + frac * (g[b] - g[a]), g, ys)], axis=1
+            )
+            for a, b in itertools.pairwise(passes)
+        ]
+    )
     if ok.sum() >= MIN_LAPS:
         ref_shape = np.median(shapes[ok], axis=0)
         dev = np.mean(np.hypot(*(shapes - ref_shape).transpose(2, 0, 1)), axis=1)
@@ -96,7 +102,7 @@ def _evaluate(passes, g, xs, ys, heading_step):
     lo, hi = _longest_run(ok)
     if hi - lo < MIN_LAPS:
         return None
-    laps = passes[lo:hi + 1]
+    laps = passes[lo : hi + 1]
     run = lengths[lo:hi]
     return laps, float(np.std(run) / np.mean(run))
 
@@ -141,8 +147,7 @@ def detect_laps(cols: dict[str, list]) -> dict | None:
     pidx = gps[np.clip(np.searchsorted(d, g[laps]), 0, len(gps) - 1)]
     pidx = np.maximum.accumulate(pidx)
     lap_list = [
-        {"index": i + 1, "start": int(s), "end": int(e)}
-        for i, (s, e) in enumerate(zip(pidx[:-1], pidx[1:])) if e > s
+        {"index": i + 1, "start": int(s), "end": int(e)} for i, (s, e) in enumerate(itertools.pairwise(pidx)) if e > s
     ]
     if len(lap_list) < MIN_LAPS:
         return None
@@ -154,15 +159,29 @@ def detect_laps(cols: dict[str, list]) -> dict | None:
         "count": len(lap_list),
         "start": lap_list[0]["start"],
         "end": lap_list[-1]["end"],
-        "lap_distance_m": round(float(np.median([dist[l["end"]] - dist[l["start"]] for l in lap_list])), 1),
+        "lap_distance_m": round(float(np.median([dist[lp["end"]] - dist[lp["start"]] for lp in lap_list])), 1),
         "gate": [round(float(a["lat"][gate]), 6), round(float(a["lon"][gate]), 6)],
         "laps": lap_list,
     }
 
 
-LAP_FIELDS = ("start_time", "distance_m", "elapsed_s", "moving_s", "avg_speed_ms", "max_speed_ms",
-              "elev_gain_m", "elev_loss_m", "avg_hr", "max_hr", "avg_cadence", "avg_power",
-              "max_power", "normalized_power", "avg_temp_c")
+LAP_FIELDS = (
+    "start_time",
+    "distance_m",
+    "elapsed_s",
+    "moving_s",
+    "avg_speed_ms",
+    "max_speed_ms",
+    "elev_gain_m",
+    "elev_loss_m",
+    "avg_hr",
+    "max_hr",
+    "avg_cadence",
+    "avg_power",
+    "max_power",
+    "normalized_power",
+    "avg_temp_c",
+)
 
 
 def _brief(summary: dict) -> dict:
@@ -182,12 +201,12 @@ def lap_report(cols: dict[str, list], sport: str, settings: dict, detection: dic
     section = analyse(window_columns(cols, detection["start"], detection["end"]), sport, settings)["summary"]
     whole = analyse(cols, sport, settings)["summary"]
 
-    times = np.array([l["elapsed_s"] or np.nan for l in laps], dtype=float)
+    times = np.array([lp["elapsed_s"] or np.nan for lp in laps], dtype=float)
     stats = None
     if np.isfinite(times).any():
         mean = float(np.nanmean(times))
-        for l, t in zip(laps, times):
-            l["delta_s"] = round(float(t - mean), 1) if np.isfinite(t) else None
+        for lp, t in zip(laps, times):
+            lp["delta_s"] = round(float(t - mean), 1) if np.isfinite(t) else None
         stats = {
             "mean_s": round(mean, 1),
             "best_index": int(np.nanargmin(times)) + 1,

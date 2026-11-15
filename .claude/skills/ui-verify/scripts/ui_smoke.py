@@ -9,6 +9,7 @@ main flows, saves screenshots and fails on console errors or broken steps.
 --db-copy works on a COPY of a real database (the original is never touched).
 Map tiles are always blocked: real tracks must not leak to the tile server.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -24,7 +25,8 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright
 
 ROOT = Path(__file__).resolve().parents[4]
-VENV_PY = ROOT / (".venv/Scripts/python.exe" if os.name == "nt" else ".venv/bin/python")
+_VENV = ROOT / (".venv/Scripts/python.exe" if os.name == "nt" else ".venv/bin/python")
+VENV_PY = _VENV if _VENV.is_file() else Path(sys.executable)  # CI: one environment for app + playwright
 
 SAMPLES = """
 import sys
@@ -42,6 +44,7 @@ def main() -> int:
     ap.add_argument("--port", type=int, default=8790)
     ap.add_argument("--db-copy", help="run against a copy of this database instead of synthetic data")
     ap.add_argument("--channel", default="msedge")
+    ap.add_argument("--core-only", action="store_true", help="start the app without modules")
     args = ap.parse_args()
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
@@ -51,8 +54,21 @@ def main() -> int:
         shutil.copy(args.db_copy, db)
 
     env = {**os.environ, "FITGIT_DB": str(db)}
-    server = subprocess.Popen([str(VENV_PY), "-m", "app", "--port", str(args.port)], cwd=ROOT, env=env,
-                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    server = subprocess.Popen(
+        [
+            str(VENV_PY),
+            "-m",
+            "app",
+            "--port",
+            str(args.port),
+            "--no-backup",
+            *(["--core-only"] if args.core_only else []),
+        ],
+        cwd=ROOT,
+        env=env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
     base = f"http://127.0.0.1:{args.port}/"
     problems: list[str] = []
     try:
@@ -64,7 +80,7 @@ def main() -> int:
                 time.sleep(0.3)
         if not args.db_copy:
             subprocess.run([str(VENV_PY), "-c", SAMPLES, str(work)], cwd=ROOT, check=True)
-        problems += run_browser(base, out, work, args.channel, synthetic=not args.db_copy)
+        problems += run_browser(base, out, work, args.channel, synthetic=not args.db_copy, core_only=args.core_only)
     finally:
         server.terminate()
         server.wait(10)
@@ -75,15 +91,29 @@ def main() -> int:
     return 1 if problems else 0
 
 
-def run_browser(base: str, out: Path, work: Path, channel: str, synthetic: bool) -> list[str]:
+def run_browser(base: str, out: Path, work: Path, channel: str, synthetic: bool, core_only: bool = False) -> list[str]:
     problems: list[str] = []
     current = ["start"]  # step name, so errors say where they happened
     with sync_playwright() as p:
-        browser = p.chromium.launch(channel=channel, headless=True)
+        # channel: "msedge" / "chrome" use an installed browser; "bundled" uses Playwright's own Chromium.
+        browser = p.chromium.launch(headless=True, **({} if channel == "bundled" else {"channel": channel}))
         page = browser.new_page(viewport={"width": 1400, "height": 1000})
         page.route("**/*.tile.openstreetmap.org/**", lambda r: r.abort())
-        page.on("console", lambda m: m.type == "error" and "ERR_FAILED" not in m.text and problems.append(f"[{current[0]}] console: {m.text}"))
-        page.on("pageerror", lambda e: problems.append(f"[{current[0]}] page error: {e} | " + " <- ".join(l.strip() for l in (e.stack or "").splitlines()[1:8])))
+        page.on(
+            "console",
+            lambda m: (
+                m.type == "error"
+                and "ERR_FAILED" not in m.text
+                and problems.append(f"[{current[0]}] console: {m.text}")
+            ),
+        )
+        page.on(
+            "pageerror",
+            lambda e: problems.append(
+                f"[{current[0]}] page error: {e} | "
+                + " <- ".join(lp.strip() for lp in (e.stack or "").splitlines()[1:8])
+            ),
+        )
         page.on("dialog", lambda d: (problems.append(f"native dialog used: {d.message!r}"), d.dismiss()))
 
         def step(name, fn):
@@ -91,25 +121,42 @@ def run_browser(base: str, out: Path, work: Path, channel: str, synthetic: bool)
             try:
                 fn()
                 print("ok  ", name)
-            except Exception as exc:  # noqa: BLE001 - report and continue
+            except Exception as exc:
                 problems.append(f"{name}: {exc}".splitlines()[0])
                 print("FAIL", name)
                 page.screenshot(path=out / f"fail_{name.replace(' ', '_')}.png", full_page=True)
 
         page.goto(base)
         if synthetic:
-            step("upload", lambda: (page.set_input_files("#file-input", [str(work / f) for f in ("track.gpx", "track2.gpx", "ride.fit")]),
-                                    page.wait_for_function("document.querySelectorAll('#activity-list li a').length >= 3")))
-        step("dashboard", lambda: (page.goto(base + "#/"), page.wait_for_selector("#trend"), page.screenshot(path=out / "01_dashboard.png", full_page=True)))
+            step(
+                "upload",
+                lambda: (
+                    page.set_input_files(
+                        "#file-input", [str(work / f) for f in ("track.gpx", "track2.gpx", "ride.fit")]
+                    ),
+                    page.wait_for_function("document.querySelectorAll('#activity-list li a').length >= 3"),
+                ),
+            )
+        step(
+            "dashboard",
+            lambda: (
+                page.goto(base + "#/"),
+                page.wait_for_selector("#trend"),
+                page.screenshot(path=out / "01_dashboard.png", full_page=True),
+            ),
+        )
 
         first = page.evaluate("fetch('/api/activities').then(r => r.json()).then(a => a.at(-1).id)")
-        laps_id = page.evaluate("fetch('/api/activities').then(r => r.json()).then(async (all) => { for (const a of all) { const d = await (await fetch('/api/activities/' + a.id)).json(); if (d.laps) return a.id; } return null; })")
+        laps_id = page.evaluate(
+            "fetch('/api/activities').then(r => r.json()).then(async (all) => { for (const a of all) { const d = await (await fetch('/api/activities/' + a.id)).json(); if (d.laps) return a.id; } return null; })"
+        )
 
         def activity():
             page.goto(base + f"#/activity/{first}")
             page.wait_for_selector("#charts canvas")
             page.wait_for_timeout(300)
             page.screenshot(path=out / "02_activity.png", full_page=True)
+
         step("activity page", activity)
 
         def overlays():
@@ -119,6 +166,7 @@ def run_browser(base: str, out: Path, work: Path, channel: str, synthetic: bool)
             page.select_option("#pal-sel", "turbo")
             page.locator("#map-card").screenshot(path=out / "03_overlay.png")
             page.select_option("#ov-sel", "none")
+
         step("map overlays", overlays)
 
         def enlarge():
@@ -126,6 +174,7 @@ def run_browser(base: str, out: Path, work: Path, channel: str, synthetic: bool)
             page.wait_for_selector("#map-card.expanded")
             page.keyboard.press("Escape")
             page.wait_for_selector("#map-card:not(.expanded)")
+
         step("map enlarge", enlarge)
 
         def drag_select():
@@ -138,9 +187,11 @@ def run_browser(base: str, out: Path, work: Path, channel: str, synthetic: bool)
             page.mouse.move(b["x"] + b["width"] * 0.6, y, steps=6)
             page.mouse.up()
             page.wait_for_selector("#sel-bar:not([hidden])")
+
         step("chart drag selection", drag_select)
 
         if laps_id:
+
             def laps():
                 page.goto(base + f"#/activity/{laps_id}")
                 page.click(".lap-hint a")
@@ -148,6 +199,7 @@ def run_browser(base: str, out: Path, work: Path, channel: str, synthetic: bool)
                 page.click('#lap-list tr[data-lap="2"]')
                 page.wait_for_selector("#sel-bar:not([hidden])")
                 page.screenshot(path=out / "04_laps.png", full_page=True)
+
             step("laps view", laps)
 
             def segment():
@@ -160,9 +212,59 @@ def run_browser(base: str, out: Path, work: Path, channel: str, synthetic: bool)
                 page.screenshot(path=out / "05_segment.png", full_page=True)
                 page.locator(".lap-list tbody tr a").first.click()
                 page.wait_for_selector('#seg-list tr[aria-selected="true"]')
+
             step("segment create + jump back", segment)
 
-        step("segments overview", lambda: (page.goto(base + "#/segments"), page.wait_for_selector("text=Creating a segment")))
+        step(
+            "segments overview",
+            lambda: (page.goto(base + "#/segments"), page.wait_for_selector("text=Creating a segment")),
+        )
+
+        def tags():
+            page.goto(base + f"#/activity/{first}")
+            page.wait_for_selector("#tag-input")
+            page.fill("#tag-input", "Smoke Test")
+            page.press("#tag-input", "Enter")
+            page.wait_for_selector(".tag:has-text('#smoke test')")
+            page.wait_for_selector("#tag-filter:not([hidden])")
+
+        step("tags", tags)
+
+        def modules_page():
+            page.goto(base + "#/modules")
+            page.wait_for_selector("text=Modules")
+            page.wait_for_timeout(200)
+            page.screenshot(path=out / "08_modules.png", full_page=True)
+            if not core_only:
+                page.click("a[href='#/modules/activity_map']")
+                page.wait_for_selector(".md h3")
+                page.screenshot(path=out / "09_module_manual.png", full_page=True)
+
+        step("modules page + manual", modules_page)
+
+        if core_only:
+
+            def no_modules():
+                if page.locator("[data-tab^='page:']").count():
+                    raise AssertionError("module tabs shown in core-only mode")
+                page.goto(base + "#/m/activity_map")
+                page.wait_for_selector("text=Page not available")
+
+            step("core-only: no module pages", no_modules)
+        else:
+
+            def map_module():
+                page.goto(base + "#/m/activity_map")
+                page.wait_for_selector("#am-map")
+                page.wait_for_function("document.querySelector('#am-status').textContent.includes('activit')")
+                page.locator("[data-sport]").first.click()
+                page.wait_for_function("location.hash.includes('sports=')")
+                page.click("[data-color=date]")
+                page.wait_for_function("location.hash.includes('color=date')")
+                page.wait_for_timeout(300)
+                page.screenshot(path=out / "10_map_module.png", full_page=True)
+
+            step("map module", map_module)
 
         def dark():
             page.goto(base + f"#/activity/{first}")
@@ -171,6 +273,7 @@ def run_browser(base: str, out: Path, work: Path, channel: str, synthetic: bool)
             page.wait_for_timeout(300)
             page.screenshot(path=out / "06_dark.png", full_page=True)
             page.click("#theme-btn")
+
         step("dark theme", dark)
 
         def mobile():
@@ -182,6 +285,7 @@ def run_browser(base: str, out: Path, work: Path, channel: str, synthetic: bool)
                 if sw > 392:
                     raise AssertionError(f"horizontal scroll at 390 px on {h}: scrollWidth={sw}")
             page.screenshot(path=out / "07_mobile.png", full_page=True)
+
         step("mobile width", mobile)
         browser.close()
     return problems

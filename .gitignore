@@ -4,3 +4,10 @@ __pycache__/
 .pytest_cache/
 data/
 *.db
+
+.ruff_cache/
+.cache/
+shots/
+shots-core/
+gl-code-quality-report.json
+report.xml

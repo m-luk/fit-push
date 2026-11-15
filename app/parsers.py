@@ -3,6 +3,7 @@
 Every parser returns an :class:`Activity` with a flat list of :class:`Point`
 records. Missing channels are ``None``; analytics decide what they can compute.
 """
+
 from __future__ import annotations
 
 import gzip
@@ -47,6 +48,7 @@ def normalise_sport(raw: str | None, sub: str | None = None) -> str:
     """Sport key from the catalogue in ``sports.py`` (sub-sport refines generic sports)."""
     return sports.normalise(raw, sub)
 
+
 def _utc(dt: datetime | None) -> datetime | None:
     if dt is None:
         return None
@@ -69,6 +71,7 @@ def _local(tag: str) -> str:
 
 # --------------------------------------------------------------------------- GPX
 
+
 def parse_gpx(data: bytes) -> Activity:
     import gpxpy
     import gpxpy.gpx
@@ -79,7 +82,7 @@ def parse_gpx(data: bytes) -> Activity:
         raise ParseError(f"invalid GPX: {exc}") from exc
 
     act = Activity(source_format="gpx", device=gpx.creator)
-    sources = []
+    sources: list = []  # track points, or route points when the file has no track
     for trk in gpx.tracks:
         act.name = act.name or trk.name
         if trk.type:
@@ -115,6 +118,7 @@ def parse_gpx(data: bytes) -> Activity:
 
 
 # --------------------------------------------------------------------------- TCX
+
 
 def _child(el, name):
     for c in el:
@@ -178,6 +182,7 @@ def parse_tcx(data: bytes) -> Activity:
 
 # --------------------------------------------------------------------------- FIT
 
+
 def parse_fit(data: bytes) -> Activity:
     import fitdecode
 
@@ -218,7 +223,7 @@ def parse_fit(data: bytes) -> Activity:
 def _fit_get(frame, name):
     try:
         return frame.get_value(name, fallback=None)
-    except Exception:  # noqa: BLE001 - fitdecode raises KeyError variants
+    except Exception:
         return None
 
 

@@ -1,7 +1,7 @@
 # AGENTS.md: working on fit-git
 
 Guidelines for AI coding agents (and humans) changing this repository. Read this
-first; it is the single source of project conventions. Tool-specific files
+first: it is the single source of project conventions. Tool-specific files
 (`CLAUDE.md`, …) only point here and add tool-specific notes.
 
 ## What this is
@@ -9,145 +9,162 @@ first; it is the single source of project conventions. Tool-specific files
 A local web app that imports sports-device files (FIT, GPX, TCX, optionally
 gzipped), stores them in SQLite and shows analytics: summaries, charts, map,
 splits, HR zones, power curve, best efforts, trimmed views and exports, repeating
-lap detection, and segments (stretches of track compared across activities).
+lap detection, segments, tags. Optional features come as **modules**.
 
 - Backend: Python 3.10+, FastAPI, numpy, gpxpy, fitdecode, SQLite (stdlib).
 - Frontend: one page, plain JavaScript (no build step), Chart.js 4 and Leaflet 1.9
   from cdnjs, OpenStreetMap tiles.
 
+## Core or module? Decide first
+
+| Change | Where |
+|---|---|
+| Data model, import/parse/analysis pipeline, something every page relies on (activities, sports, tags, laps, segments, settings, storage) | **core** (`app/`) |
+| An optional capability with its own page, activity card or API; useful to some users | **module** (`modules/<id>/`), see the **module-development** skill and `modules/RULES.md` |
+| A module needs something the SDK lacks | a separate **core** change extending `app/sdk.py` / `window.fitgit`, documented in `docs/SDK.md` |
+
+Modules must stay small (one capability), self-contained, owned (GitHub id) and
+documented (`README.md` intent + `MANUAL.md`). Working on a module never requires
+reading `app/`; that keeps the context small and the core safe.
+
 ## Commands
 
 ```bash
-python scripts/run.py                 # creates .venv, installs deps, serves http://127.0.0.1:8000
-python scripts/run.py --reload        # restart on Python changes
-python scripts/run.py --tests         # install dev deps, run pytest (extra args pass through)
-.venv/Scripts/python -m pytest -q     # (Windows) tests directly; .venv/bin/python elsewhere
-node --check app/static/app.js        # syntax check the frontend
+python scripts/run.py                    # venv + deps, then serve http://127.0.0.1:8000 (core + modules)
+python scripts/run.py --core-only        # core only (any `python -m app` option passes through)
+python scripts/run.py --tests            # pytest: core (twice: core-only + all modules) + module tests
+python scripts/modules.py check          # module rules + generated docs up to date
+python scripts/modules.py docs           # regenerate modules/INDEX.md + docs/MODULES_MANUAL.md
+ruff check . && ruff format --check .    # lint + format (config in pyproject.toml)
+ty check                                 # type check
+node --check app/static/app.js           # JS syntax
 ```
 
-VS Code tasks (`.vscode/tasks.json`) wrap the same commands: **fit-git: run**
-(Ctrl+Shift+B), **run (auto-reload)**, **tests**. They are `process` tasks that
-start Python directly; keep them that way (shell tasks broke under cmd / Git Bash).
+VS Code tasks: **run** (Ctrl+Shift+B), **run (auto-reload)**, **run (core only)**,
+**tests**, **lint + types**. They are `process` tasks that start Python directly;
+keep them that way (shell tasks broke under cmd / Git Bash).
 
-The database defaults to `data/activities.db`; `FITGIT_DB` overrides it. Use a
-scratch DB (or a *copy* of the real one) for experiments, never the real file.
+**After changing Python code, restart the server** (or run it with `--reload`).
+Static files are served `no-cache`, so a normal browser refresh picks up JS/CSS.
 
-**After changing Python code, restart the server**: it does not reload unless
-started with `--reload`. Static files are served with `Cache-Control: no-cache`,
-so a normal browser refresh picks up JS/CSS changes.
+## Quality gates (CI runs exactly these)
+
+GitHub Actions (`.github/workflows/ci.yml`) and GitLab CI (`.gitlab-ci.yml`) run:
+- ruff check, ruff format --check, ty check, `node --check`;
+- pytest on Linux/Windows/macOS and Python 3.10–3.13;
+- `scripts/modules.py check`;
+- the UI smoke test, with modules and core-only.
+
+Run them locally before committing; a red gate is not "done".
+
+## Data location and backups
+
+`app/paths.py`. The database lives in the per-user data directory:
+- Windows: `%LOCALAPPDATA%\fit-git`
+- macOS: `~/Library/Application Support/fit-git`
+- Linux: `$XDG_DATA_HOME/fit-git` (default `~/.local/share/fit-git`)
+
+Override with `--data-dir` / `FITGIT_DATA_DIR` or `--db` / `FITGIT_DB`. The old
+`<repo>/data/activities.db` is copied over once.
+
+Every `python -m app` start first copies the database to `<data dir>/backups/`
+(SQLite online backup; newest `FITGIT_BACKUPS`=10 automatic copies kept).
+`--list-backups` and `--restore latest|<file>` put one back, saving the current
+database as a `pre-restore` copy first. Never weaken this safety net.
 
 ## Layout
 
 ```
 app/
-  parsers.py    FIT / GPX / TCX (+gzip) -> Activity(points); sport normalisation
-  analytics.py  numpy metrics: distance, moving time, elevation, zones, NP/TSS,
-                power curve, splits, best efforts, chart series (downsampled)
-  laps.py       repeating-lap detection (GPS "gate" passes) and lap reports
-  segments.py   segment geometry and effort matching
-  writers.py    GPX / TCX / FIT writers (export, "cut to new file")
-  storage.py    SQLite: activities (zlib JSON point columns), settings, segments, efforts
-  main.py       FastAPI app factory create_app(db_path) and all routes
-  static/       index.html, app.js, style.css (the whole frontend)
+  main.py         create_app(db_path, modules, modules_dir): store, core, routers, modules, static
+  core.py         Core service: ALL orchestration (import, clip, tags, laps cache, segment
+                  matching, settings recompute) + events; NotFound -> 404, Invalid -> 422
+  routes/         thin HTTP routers (activities, segments, system); no logic here
+  events.py       EventBus (activity.imported/updated/deleted, settings.changed, segment.*)
+  sdk.py          module SDK (versioned): ModuleContext, CoreAPI, ModuleDB
+  modules.py      module discovery, manifest validation, isolated loading, /api/modules, /m/<id>/*
+  paths.py        data directory, legacy migration, backups/restore
+  parsers.py, analytics.py, laps.py, segments.py, writers.py, sports.py, storage.py
+  static/         index.html, app.js (core UI + window.fitgit SDK), style.css
+modules/
+  RULES.md, README.md, INDEX.md (generated), _template/, <id>/ (one folder per module)
+docs/
+  SDK.md          the module contract;  MODULES_MANUAL.md (generated)
 tests/
-  samples.py    synthetic tracks (straight, 400 m track laps) + GPX/TCX/FIT encoders
-  test_app.py   parser, analytics, API, laps, segments tests
-scripts/run.py  cross-platform launcher (venv, deps, run / tests)
-.claude/skills/ UI development and UI verification skills (see below)
+  core/           core tests by area;  helpers.py, samples.py (synthetic data)
+  test_module_contract.py   rules for every module + isolation guarantees
+conftest.py       fixtures: client (core-only AND all modules), make_client(modules=...)
+scripts/          run.py (launcher), modules.py (new/check/docs/list)
+.claude/skills/   ui-development, ui-verify, module-development
 ```
 
 ## Core invariants (don't break these)
 
-1. **One index space.** Points are stored raw. `analytics._prepare` cleans them
-   (sorts by time, drops duplicate timestamps). Every index exchanged with the
-   frontend or stored in the DB (trim windows `start`/`end`, `series.idx`, lap
-   boundaries, segment efforts) refers to the **cleaned** sequence of the
-   **whole** activity. A trimmed view offsets `series.idx` so it stays absolute.
-2. **Activities are immutable.** Points never change after import; derived data
-   is recomputed: summaries when settings or sport change, lap detection is
-   cached by `(id, sha256)`, segment efforts are re-matched on upload, clip,
-   sport change, segment creation and rescan. A new feature that derives data
-   from points must hook into the same places.
-3. **SI units in the backend** (m, s, m/s, °C, W, bpm). Unit conversion and
-   formatting happen only in the frontend (`UNITS`, `fmt*` helpers).
-4. **Duplicates by content hash.** Uploads are keyed by sha256 of the file;
-   clips by `sha256("clip:{source sha}:{start}:{end}")`.
-5. **Trimmed views are temporary.** `?start=&end=` never writes anything; only
-   "Save as activity" (`/clip`) and "Create segment" persist.
+1. **One index space.** Points are stored raw; `analytics._prepare` cleans them (sort
+   by time, drop duplicate timestamps). Every index exchanged with the frontend, the
+   DB or modules (trim windows, `series.idx`, laps, segment efforts, `ctx.core.points`)
+   refers to the **cleaned** sequence of the **whole** activity.
+2. **Activities are immutable; derived data is refreshed in `Core`.** Summaries on
+   settings/sport change, lap cache by `(id, sha256)`, segment efforts on upload,
+   clip, sport change, segment creation and rescan. New derived data hooks into the
+   same `Core` methods, and the core emits an event for each change.
+3. **SI units in the backend**; conversion only in the frontend (`UNITS`, `fmt*`).
+4. **Duplicates by content hash**; clips by `sha256("clip:{sha}:{start}:{end}")`.
+5. **Trimmed views are temporary**; only clip, segment creation and tags persist.
+6. **Modules cannot break the core.** Loading errors, handler errors and frontend
+   exceptions are contained and shown on the Modules page. Keep it that way:
+   wrap every new extension point the same way.
 
 ## Backend conventions
 
-- Create the app through `create_app(db_path)` (factory; uvicorn runs it with
-  `factory=True`). No module-level app instance.
-- Pydantic models and `Annotated` query aliases live at **module level** in
-  `main.py` (`from __future__ import annotations` + aliases inside the factory
-  caused `ForwardRef` errors).
-- Validation errors → 422, missing objects → 404, raised as `HTTPException`.
-  Domain modules raise `ValueError` subclasses (`ParseError`, `ExportError`,
-  `SegmentError`); routes translate them.
-- numpy for anything per-point; avoid Python loops over points except where a
-  loop is clearer and bounded (e.g. spatial-grid lookups). Convert numpy scalars
-  to `float`/`int` before returning JSON (`_num` helper in analytics).
-- Geometry: compare tracks at a **fixed metre spacing**, never a fixed number of
-  points (a 200-point comparison broke 40 km segments). Use local x/y metres
-  (`_xy`/`_project`), not raw degrees.
-- New dependencies only when clearly needed; add them to `requirements.txt`
-  (runtime) or `requirements-dev.txt` (tests).
-- Write text files with an explicit `encoding="utf-8"`: the Windows default
-  (cp1252) once silently emptied the README.
+- Logic goes in `Core` (or a domain module it calls), never in routes. Routes are
+  one-liners over `Core` with Pydantic models at module level.
+- Domain errors: raise `NotFound` / `Invalid` (or `ValueError` subclasses
+  translated to `Invalid`); never `HTTPException` outside routes.
+- numpy for anything per point; convert numpy scalars to `float`/`int` before
+  JSON. Geometry is compared at a fixed metre spacing in local x/y metres.
+- New dependencies only when clearly needed (`requirements.txt` /
+  `requirements-dev.txt`). Write text files with `encoding="utf-8"`.
+- Type hints on new code; `ty check` must pass. `ruff format` decides the layout.
 
 ## Frontend conventions (summary)
 
-Use the **ui-development** skill (`.claude/skills/ui-development/SKILL.md`) for
-any change under `app/static/`. Key rules:
+Use the **ui-development** skill for any change under `app/static/`, and the
+**ui-verify** skill to check it in a browser. Key rules:
 
-- Plain JS in one IIFE; no frameworks or build step. External scripts only from
-  cdnjs with pinned versions.
-- Colours come from CSS tokens in `style.css`, defined for light **and** dark
-  (`prefers-color-scheme` + `[data-theme]`). Read them with `css("--token")`.
-- One y-axis per chart (small multiples); fixed colour per metric; legends
-  and text in text tokens, never series colours.
-- No `prompt()` / `alert()` for input: embedded browsers (e.g. VS Code) block
-  them. Use `askName()` and `toast()`.
-- View state lives in the URL hash (`#/activity/3?start=&end=&laps=1&effort=7`);
-  per-viewer preferences in `localStorage` via `lsGet`/`lsSet` (wrapped in
-  try/catch).
-- Async `render*` functions guard every `await` with the render token
-  (`newRender()` / `stale(token)`); dispose the Leaflet map before replacing
-  the page, and never animate programmatic map moves (see the skill for why).
-- Verify UI work in a real browser with the **ui-verify** skill before calling
-  it done; `node --check` alone is not verification. Its smoke test caught two
-  bugs that every quick check missed.
+- Plain JS, one IIFE, no build step; cdnjs scripts with pinned versions.
+- Colours from CSS tokens (light **and** dark); `css("--token")` in JS.
+- One y-axis per chart; fixed colour per metric; text in text tokens.
+- No `prompt()`/`alert()`; use `askName()` / `toast()`.
+- View state in the URL hash; per-viewer preferences in `localStorage` (try/catch).
+- Async renders guard every `await` with the render token; dispose maps (and module
+  cleanups) before replacing the page; no animated programmatic map moves.
+- `window.fitgit` is a public contract (docs/SDK.md): extend, don't break.
 
 ## Tests
 
-- Every behaviour change gets a test in `tests/test_app.py`; every bug fix gets
-  a regression test that fails without the fix.
-- Build inputs with `tests/samples.py` (`synthetic_track`, `lap_track`,
-  `to_gpx/to_tcx/to_fit`). Never commit or depend on real activity files.
-- API tests use `TestClient(create_app(tmp_path / "test.db"))`.
-- Run the full suite before committing; it takes a few seconds.
+- Every behaviour change gets a test; every bug fix a regression test.
+- Core tests in `tests/core/`, using `client` (runs core-only and with all modules)
+  and `tests.helpers` / `tests.samples`. Module tests live in the module.
+- Never commit or depend on real activity files.
 
 ## Data and privacy
 
-- `data/`, `*.db` and personal activity files (e.g. `*_ACTIVITY.fit` in the repo
-  root) are the user's data: never commit, upload or paste them. Work on copies
-  in a temp directory.
-- GPS tracks reveal where someone lives and trains. Automated browser runs on
-  real data must block map-tile requests (the ui-verify script does).
+- The database, backups and personal activity files (e.g. `*_ACTIVITY.fit`) are the
+  user's data: never commit, upload or paste them; work on copies.
+- GPS tracks reveal where someone lives. Automated browser runs on real data block
+  map tiles (the ui-verify script does).
+- Modules list owners by GitHub id only: no names or e-mails.
 
 ## Git
 
 - Small, focused commits; imperative subject (≤ 72 chars), body says *why*.
-- No attribution / co-author lines in commit messages.
-- Stage files explicitly (`git add app tests README.md …`); check `git status`
-  so untracked personal files never sneak in.
-- Update `README.md` when user-visible behaviour or the API changes (feature
-  sections + API table + layout).
+- No attribution / co-author lines.
+- Stage files explicitly; check `git status` so personal files never sneak in.
+- Update `README.md` when behaviour or the API changes; regenerate module docs.
 
 ## Environment notes
 
-- Development happens on Windows with PowerShell 7 and Python from scoop;
-  `python` is on PATH, the venv interpreter is `.venv\Scripts\python.exe`.
-- Files are a mix of LF/CRLF; Git normalises on commit. When doing literal
-  string replacement from a script, account for `\r\n`.
+- Development on Windows with PowerShell 7 and Python from scoop; the venv
+  interpreter is `.venv\Scripts\python.exe`.
+- Mixed LF/CRLF in the tree; when doing literal replacements from scripts, allow `\r\n`.

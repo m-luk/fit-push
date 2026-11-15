@@ -27,7 +27,15 @@ After the change, verify it in a browser with the **ui-verify** skill.
 | segments on an activity | `segEffortsTable`, `selectEffort`, `wireSegEfforts`, `createSegment`, map pick (`startPick/onPickClick/endPick`) |
 | laps view | `renderLaps` (summary table, lap-time chart, lap list) |
 | segments pages | `loadSegments`, `renderSegList`, `setTab`, `leaveActivity`, `renderSegmentsPage`, `renderSegment` |
+| tags (core) | `loadTags`, `renderTagFilter` (sidebar), `renderTagEditor` (chips under the activity title) |
+| module SDK (window.fitgit) | the frozen `sdk` object, `registerPage` / `registerActivityCard`, `pageCleanups` + `runCleanups` (called from `disposeMap`), `loadModules` (CSS + scripts from `/m/<id>/`), `renderNav`, `renderModulePage`, `renderModuleCards`, `selectNamed`, `showModuleError` |
+| modules page (+ docs) | `markdown()` (small, escaping renderer), `renderModulesPage` (`#/modules`, `#/modules/<id>`) |
 | router | `route()` parses the hash and calls a `render*` function |
+
+`window.fitgit` is a **public contract** for modules (docs/SDK.md). Adding to it is
+a core change: document it in docs/SDK.md and keep old calls working. Every new
+extension point must contain module errors (`try/catch` → `showModuleError`) and
+register cleanups so navigation frees maps and charts.
 
 ## Routing and state
 

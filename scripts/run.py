@@ -8,7 +8,10 @@ then runs the app or pytest with the venv's interpreter.
     python scripts/run.py --port 9000 --reload
     python scripts/run.py --host 0.0.0.0
     python scripts/run.py --tests [pytest args...]
+    python scripts/run.py --core-only            # any `python -m app` option is passed through
+    python scripts/run.py --list-backups / --restore latest
 """
+
 from __future__ import annotations
 
 import argparse
@@ -43,8 +46,9 @@ def ensure_requirements(py: Path, dev: bool) -> None:
     if digest in installed:
         return
     print(f"Installing {files[-1]} ...", flush=True)
-    subprocess.run([str(py), "-m", "pip", "install", "--disable-pip-version-check", "-q",
-                    "-r", files[-1]], cwd=ROOT, check=True)
+    subprocess.run(
+        [str(py), "-m", "pip", "install", "--disable-pip-version-check", "-q", "-r", files[-1]], cwd=ROOT, check=True
+    )
     # remember both the plain and the dev digest, so a dev install also covers a plain run
     plain = hashlib.sha256((ROOT / "requirements.txt").read_bytes()).hexdigest()
     STAMP.write_text(" ".join(sorted({digest, plain} if dev else {digest})))
@@ -64,7 +68,8 @@ def main() -> int:
     if args.tests:
         cmd = [str(py), "-m", "pytest", "-q", *extra]
     else:
-        cmd = [str(py), "-m", "app", "--host", args.host, "--port", str(args.port)]
+        # Everything else (--core-only, --modules, --data-dir, --db, --no-backup, --restore, ...) goes to the app.
+        cmd = [str(py), "-m", "app", "--host", args.host, "--port", str(args.port), *extra]
         if args.reload:
             cmd.append("--reload")
         print(f"fit-git on http://{args.host}:{args.port}  (Ctrl+C to stop)", flush=True)

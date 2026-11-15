@@ -18,6 +18,10 @@
     selListeners: [], // called after every selection change (laps view, segments card)
     effort: null,     // selected segment effort {id, name, range}
     segments: [],
+    tags: [],         // [{tag, count}]
+    tagFilter: "",
+    modules: [],      // GET /api/modules
+    tab: "activities",
     pick: null,       // map "pick start/end" mode
     lap: null,        // selected lap number in the laps view
     lapRange: null,   // its series range, to notice when the selection moves elsewhere
@@ -39,6 +43,11 @@
     }
     return res.status === 204 ? null : res.json();
   }
+  api.text = async (path) => {
+    const res = await fetch(path);
+    if (!res.ok) throw new Error(res.statusText);
+    return res.text();
+  };
 
   let toastTimer;
   function toast(msg) {
@@ -173,7 +182,7 @@
   $("#sport-filter").addEventListener("change", (e) => { state.sport = e.target.value; renderList(); route(); });
 
   function renderList() {
-    const items = state.activities.filter((a) => !state.sport || a.sport === state.sport);
+    const items = state.activities.filter((a) => (!state.sport || a.sport === state.sport) && (!state.tagFilter || (a.tags || []).includes(state.tagFilter)));
     $("#count").textContent = `${items.length} activit${items.length === 1 ? "y" : "ies"}`;
     const ul = $("#activity-list");
     if (!items.length) { ul.innerHTML = `<li class="empty">No activities yet.</li>`; return; }
@@ -245,6 +254,7 @@
   // Remove the Leaflet map *before* its container leaves the page: a pending zoom/pan
   // animation on a detached map throws "_leaflet_pos" errors.
   function disposeMap() {
+    runCleanups(); // module pages/cards free their maps and charts too
     if (!map) return;
     map.off(); map.stop(); map.remove(); map = null;
   }
@@ -427,7 +437,7 @@
     const token = newRender();
     disposeMap();
     destroyCharts();
-    state.sel = null; state.lap = null; state.lapRange = null; state.effort = null; state.selListeners = [];
+    state.sel = null; state.lap = null; state.lapRange = null; state.effort = null; state.named = null; state.selListeners = [];
     endPick();
     main.innerHTML = `<div class="spinner">Analysing…</div>`;
     let a, laps = null;
@@ -471,6 +481,7 @@
         <div style="flex:1;min-width:240px">
           <input class="title-input" id="name-input" value="${esc(a.name)}" aria-label="Activity name" maxlength="200">
           <div class="sub">${sportIcon(a.sport)} ${esc(fmtDate(a.start_time))} · ${esc(a.source_format.toUpperCase())}${a.device ? " · " + esc(a.device) : ""}</div>
+          <div class="tag-row" id="tag-row"></div>
         </div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
           ${a.window ? "" : `<span class="export-group" aria-label="Export full activity"><span class="muted">Export</span>${exportLinks(a, null)}</span>`}
@@ -519,6 +530,7 @@
           <div class="sel-bar" id="sel-bar" hidden></div>
           <div id="charts"></div>
         </div>
+        <div id="module-cards" class="stack"></div>
         <div class="grid two">
           ${a.hr_zones ? `<div class="card"><h2>Heart-rate zones <span class="muted" style="font-weight:400">max ${a.settings_used.max_hr} bpm</span></h2>${zonesHtml(a.hr_zones)}</div>` : ""}
           ${a.splits.length ? `<div class="card"><h2>Splits per ${u().split}</h2>${splitsHtml(a.splits, pace)}</div>` : ""}
@@ -547,6 +559,7 @@
       toast("Activity deleted"); await Promise.all([loadList(), loadSegments()]); location.hash = "#/";
     });
 
+    renderTagEditor(a);
     if (a.track) drawMap(a, lapsMode ? laps : null);
     let xMode = lsGet("xmode") === "time" && a.series.time_s ? "time" : "distance";
     if (!a.series.distance_m.at(-1)) xMode = a.series.time_s ? "time" : "distance";
@@ -560,6 +573,7 @@
     if (a.power_curve?.length) powerCurveChart($("#pc"), a.power_curve, false);
     if (lapsMode) renderLaps(a, laps);
     if (efforts.length) wireSegEfforts(a, efforts);
+    renderModuleCards(a);
     if (opts.effort) {
       const e = efforts.find((x) => x.id === opts.effort);
       if (e) { selectEffort(a, e); $("#seg-card")?.scrollIntoView({ block: "center" }); }
@@ -976,6 +990,7 @@
     // A drag or Clear replaces a selected lap / segment effort.
     if (state.lap && !same(state.lapRange)) { state.lap = null; state.lapRange = null; }
     if (state.effort && !same(state.effort.range)) state.effort = null;
+    if (state.named && !same(state.named.range)) state.named = null;
     try { drawSelection(a, sel); } finally { state.selListeners.forEach((f) => f()); }
   }
 
@@ -983,6 +998,7 @@
   function selectionLabel(a) {
     if (state.lap) return { title: `Lap ${state.lap}`, noun: "lap", name: `${a.name} – lap ${state.lap}` };
     if (state.effort) return { title: `Segment “${state.effort.name}”`, noun: "effort", name: `${a.name} – ${state.effort.name}` };
+    if (state.named) return { title: state.named.name, noun: "selection", name: `${a.name} – ${state.named.name}` };
     return { title: "Selection", noun: "selection", name: undefined };
   }
 
@@ -1235,9 +1251,11 @@
     }).join("");
   }
 
+  // Nav highlight; the sidebar shows segments on segment pages and activities everywhere else.
   function setTab(tab) {
+    state.tab = tab;
     document.querySelectorAll("[data-tab]").forEach((t) => t.classList.toggle("active", t.dataset.tab === tab));
-    $("#tab-activities").hidden = tab !== "activities";
+    $("#tab-activities").hidden = tab === "segments";
     $("#tab-segments").hidden = tab !== "segments";
   }
 
@@ -1352,9 +1370,262 @@
     });
   }
 
+  // ------------------------------------------------------------------ tags (core)
+  async function loadTags() {
+    state.tags = await api("/api/tags");
+    renderTagFilter();
+  }
+
+  function renderTagFilter() {
+    const sel = $("#tag-filter");
+    if (!sel) return;
+    if (!state.tags.some((t) => t.tag === state.tagFilter)) state.tagFilter = "";
+    sel.hidden = !state.tags.length;
+    sel.innerHTML = `<option value="">All tags</option>` +
+      state.tags.map((t) => `<option value="${esc(t.tag)}" ${t.tag === state.tagFilter ? "selected" : ""}>#${esc(t.tag)} (${t.count})</option>`).join("");
+  }
+
+  function renderTagEditor(a) {
+    const row = $("#tag-row");
+    if (!row) return;
+    const draw = (focus) => {
+      row.innerHTML = a.tags.map((t) => `<span class="tag">#${esc(t)}<button type="button" data-rm="${esc(t)}" aria-label="Remove tag ${esc(t)}" title="Remove">×</button></span>`).join("") +
+        `<input id="tag-input" class="tag-input" list="tag-suggest" placeholder="+ add tag" aria-label="Add a tag" maxlength="32">
+         <datalist id="tag-suggest">${state.tags.filter((t) => !a.tags.includes(t.tag)).map((t) => `<option value="${esc(t.tag)}">`).join("")}</datalist>`;
+      if (focus) $("#tag-input").focus();
+    };
+    const save = async (tags, focus) => {
+      try {
+        a.tags = (await api(`/api/activities/${a.id}/tags`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tags }) })).tags;
+        await Promise.all([loadTags(), loadList()]);
+        draw(focus);
+      } catch (e) { toast("Could not save tags: " + e.message); }
+    };
+    row.addEventListener("click", (ev) => { const b = ev.target.closest("[data-rm]"); if (b) save(a.tags.filter((t) => t !== b.dataset.rm)); });
+    row.addEventListener("change", (ev) => { // Enter, a datalist pick, or leaving the field
+      const v = ev.target.id === "tag-input" ? ev.target.value.trim() : "";
+      if (v) save([...a.tags, v], true);
+    });
+    draw(false);
+  }
+
+  // ------------------------------------------------------------------ module SDK (window.fitgit)
+  // The only API frontend modules may use; documented in docs/SDK.md. Keep it stable.
+  const modulePages = new Map(); // page id -> {module, id, label, icon, render}
+  const moduleCards = [];        // {module, title, order, render}
+  let pageCleanups = [];
+  function runCleanups() {
+    for (const f of pageCleanups.splice(0)) { try { f(); } catch (e) { console.error(e); } }
+  }
+  const moduleOf = (def) => def.module || /\/m\/([^/]+)\//.exec(document.currentScript?.src || "")?.[1] || "unknown";
+
+  function showModuleError(el, module, err) {
+    console.error(`[module ${module}]`, err);
+    el.innerHTML = `<div class="module-error" role="alert">⚠ The <b>${esc(module)}</b> module failed: ${esc(err?.message || err)}.
+      The rest of the app is unaffected. <a href="#/modules/${esc(module)}">Module info</a></div>`;
+  }
+
+  const sdk = Object.freeze({
+    version: "1.0",
+    /** A page with its own sidebar tab, routed at #/m/<id>. render(el, ctx) may be async. */
+    registerPage(def) {
+      const module = moduleOf(def), id = def.id || module;
+      modulePages.set(id, { module, id, label: def.label || id, icon: def.icon || "🧩", render: def.render });
+      renderNav();
+    },
+    /** A card on every activity page. render(el, ctx) returns false to hide the card for that activity. */
+    registerActivityCard(def) {
+      moduleCards.push({ module: moduleOf(def), title: def.title, order: def.order ?? 100, render: def.render });
+      moduleCards.sort((x, y) => x.order - y.order);
+    },
+    api, toast, esc, css, askName,
+    navigate: (hash) => { location.hash = hash; },
+    fmt: Object.freeze({ num: fmtNum, dist: fmtDist, ele: fmtEle, dur: fmtDur, pace: fmtPace, speed: fmtSpeed, date: fmtDate, day: fmtDay, units: () => ({ ...u() }) }),
+    sports: Object.freeze({ list: () => [...SPORTS.values()], get: sportInfo, icon: sportIcon, name: sportName, isPace }),
+    tags: () => state.tags.map((t) => ({ ...t })),
+    /** Leaflet map with the standard tiles; removed automatically when the page changes. */
+    map(el, opts = {}) {
+      const m = L.map(el, { preferCanvas: true, scrollWheelZoom: true, ...opts });
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+      }).addTo(m);
+      pageCleanups.push(() => { m.off(); m.stop(); m.remove(); });
+      return m;
+    },
+    /** Chart.js chart with the app's axis/tooltip styling helpers; destroyed when the page changes. */
+    chart(canvas, config) { const c = new Chart(canvas, config); pageCleanups.push(() => c.destroy()); return c; },
+    chartStyle: Object.freeze({ scales: baseScales, tooltip: tooltipStyle }),
+  });
+  window.fitgit = sdk;
+
+  async function loadModules() {
+    try { state.modules = await api("/api/modules"); } catch { state.modules = []; }
+    const load = (tag, attrs) => new Promise((resolve) => {
+      const el = Object.assign(document.createElement(tag), attrs);
+      el.onload = () => resolve(true);
+      el.onerror = () => resolve(false);
+      document.head.append(el);
+    });
+    await Promise.all(state.modules.filter((m) => m.css).map((m) => load("link", { rel: "stylesheet", href: `/m/${m.id}/frontend.css` })));
+    for (const m of state.modules.filter((x) => x.frontend)) { // one by one, in a stable order
+      if (!(await load("script", { src: `/m/${m.id}/frontend.js` }))) {
+        m.status = "error"; m.errors.push("frontend.js failed to load");
+      }
+    }
+    renderNav();
+  }
+
+  function renderNav() {
+    const nav = $(".side-tabs");
+    if (!nav) return;
+    nav.innerHTML = `<a href="#/" data-tab="activities">Activities</a><a href="#/segments" data-tab="segments">Segments</a>` +
+      [...modulePages.values()].map((p) => `<a href="#/m/${esc(p.id)}" data-tab="page:${esc(p.id)}" title="${esc(p.label)} (module: ${esc(p.module)})">${esc(p.icon)} ${esc(p.label)}</a>`).join("");
+    setTab(state.tab || "activities");
+  }
+
+  async function renderModulePage(pageId, query) {
+    const token = newRender();
+    leaveActivity(); renderList();
+    const page = modulePages.get(pageId);
+    if (!page) {
+      main.innerHTML = `<div class="welcome"><h1>Page not available</h1><p class="muted">The module providing “${esc(pageId)}” is not loaded (the app may be running core-only).</p><a href="#/modules">Modules</a></div>`;
+      return;
+    }
+    main.innerHTML = `<div class="module-page" data-module="${esc(page.module)}"></div>`;
+    const el = main.firstElementChild;
+    const ctx = {
+      params: new URLSearchParams(query || ""),
+      /** Store page state in the URL (bookmarkable) without re-rendering. */
+      setParams(obj) {
+        const q = new URLSearchParams(Object.entries(obj).filter(([, v]) => v != null && v !== ""));
+        history.replaceState(null, "", `#/m/${pageId}${q.toString() ? "?" + q : ""}`);
+      },
+      onCleanup: (f) => pageCleanups.push(f),
+      isStale: () => stale(token),
+      sdk,
+    };
+    try { await page.render(el, ctx); } catch (e) { if (!stale(token)) showModuleError(el, page.module, e); }
+  }
+
+  function renderModuleCards(a) {
+    const box = $("#module-cards");
+    if (!box) return;
+    for (const card of moduleCards) {
+      const el = document.createElement("div");
+      el.className = "card module-card";
+      el.dataset.module = card.module;
+      el.innerHTML = `<h2><span>${esc(card.title)}</span><span class="muted module-badge" title="Provided by a module">${esc(card.module)}</span></h2><div class="module-body"></div>`;
+      box.append(el);
+      const ctx = {
+        activity: a,
+        /** Highlight absolute point indices start..end on charts and map, labelled in the selection bar. */
+        select: (start, end, label) => selectNamed(a, start, end, label),
+        onCleanup: (f) => pageCleanups.push(f),
+        sdk,
+      };
+      const fail = (e) => showModuleError(el.querySelector(".module-body"), card.module, e);
+      try {
+        const r = card.render(el.querySelector(".module-body"), ctx);
+        if (r === false) el.remove();
+        else if (r && typeof r.then === "function") r.then((v) => { if (v === false) el.remove(); }, fail);
+      } catch (e) { fail(e); }
+    }
+  }
+
+  function selectNamed(a, start, end, label) {
+    const idx = a.series.idx;
+    state.sel = { i0: nearestIdx(idx, start), i1: nearestIdx(idx, end) };
+    state.lap = null; state.lapRange = null; state.effort = null;
+    state.named = { name: String(label || "Selection"), range: { ...state.sel } };
+    renderSelection(a);
+  }
+
+  // ------------------------------------------------------------------ modules page (+ docs)
+  // Minimal, safe Markdown -> HTML for module READMEs and manuals (text is escaped first).
+  function markdown(md, { dropTitle = false } = {}) {
+    if (dropTitle) md = md.replace(/^\s*#\s+[^\n]*\n/, ""); // the page already shows the title
+    const inline = (s) => esc(s)
+      .replace(/`([^`]+)`/g, "<code>$1</code>")
+      .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+      .replace(/(^|[^*])\*([^*]+)\*/g, "$1<em>$2</em>")
+      .replace(/\[([^\]]+)\]\(((?:https?:\/\/|#)[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+    const out = [];
+    const lines = md.replace(/\r\n/g, "\n").split("\n");
+    for (let i = 0; i < lines.length;) {
+      const l = lines[i];
+      if (/^```/.test(l)) {
+        const code = [];
+        for (i++; i < lines.length && !/^```/.test(lines[i]); i++) code.push(lines[i]);
+        out.push(`<pre><code>${esc(code.join("\n"))}</code></pre>`); i++; continue;
+      }
+      const h = /^(#{1,4})\s+(.*)$/.exec(l);
+      if (h) { const n = Math.min(4, h[1].length + 1); out.push(`<h${n}>${inline(h[2])}</h${n}>`); i++; continue; }
+      if (/^\s*[-*]\s+/.test(l) || /^\s*\d+\.\s+/.test(l)) {
+        const ordered = /^\s*\d+\./.test(l), items = [];
+        while (i < lines.length && /^\s*([-*]|\d+\.)\s+/.test(lines[i])) {
+          let item = lines[i++].replace(/^\s*([-*]|\d+\.)\s+/, "");
+          // indented lines that are not a new item continue the current one
+          for (; i < lines.length && /^\s{2,}\S/.test(lines[i]) && !/^\s*([-*]|\d+\.)\s+/.test(lines[i]); i++) item += " " + lines[i].trim();
+          items.push(`<li>${inline(item)}</li>`);
+        }
+        out.push(ordered ? `<ol>${items.join("")}</ol>` : `<ul>${items.join("")}</ul>`); continue;
+      }
+      if (/^\|.*\|\s*$/.test(l)) {
+        const rows = [];
+        for (; i < lines.length && /^\|.*\|\s*$/.test(lines[i]); i++) if (!/^\|[\s:|-]+\|\s*$/.test(lines[i])) rows.push(lines[i].trim().slice(1, -1).split("|").map((c) => c.trim()));
+        out.push(`<div class="table-scroll"><table class="md-table">${rows.map((r, k) => `<tr>${r.map((c) => (k ? `<td>${inline(c)}</td>` : `<th>${inline(c)}</th>`)).join("")}</tr>`).join("")}</table></div>`); continue;
+      }
+      if (/^>\s?/.test(l)) {
+        const q = [];
+        for (; i < lines.length && /^>\s?/.test(lines[i]); i++) q.push(inline(lines[i].replace(/^>\s?/, "")));
+        out.push(`<blockquote>${q.join("<br>")}</blockquote>`); continue;
+      }
+      if (!l.trim()) { i++; continue; }
+      const para = [];
+      for (; i < lines.length && lines[i].trim() && !/^(#{1,4}\s|```|\s*[-*]\s|\s*\d+\.\s|\||>)/.test(lines[i]); i++) para.push(inline(lines[i]));
+      out.push(`<p>${para.join(" ")}</p>`);
+    }
+    return out.join("\n");
+  }
+
+  async function renderModulesPage(moduleId) {
+    const token = newRender();
+    leaveActivity(); renderList();
+    const mods = state.modules || [];
+    const badge = (m) => `<span class="badge status-${esc(m.status)}">${esc(m.status)}</span>`;
+    const owner = (m) => (m.owner?.github ? `<a href="https://github.com/${esc(m.owner.github)}" target="_blank" rel="noopener">@${esc(m.owner.github)}</a>` : "–");
+    if (!moduleId) {
+      main.innerHTML = `<div class="page-head"><div><h1>Modules</h1>
+          <div class="sub">Optional features in <code>modules/</code>. Each has an owner, an intent and a manual.</div></div></div>
+        ${mods.length ? `<div class="grid two">${mods.map((m) => `<div class="card module-tile">
+          <h2><span>${esc(m.name)} <span class="muted" style="font-weight:400">v${esc(m.version || "?")}</span></span>${badge(m)}</h2>
+          <p>${esc(m.summary || "")}</p>
+          <p class="muted">Owner ${owner(m)}${m.maintainers?.length ? ` · maintainers ${m.maintainers.map((x) => `@${esc(x)}`).join(", ")}` : ""} · provides ${esc((m.provides || []).join(", "))}</p>
+          ${m.errors?.length ? `<div class="module-error">${m.errors.map(esc).join("<br>")}</div>` : ""}
+          <a class="btn small" href="#/modules/${esc(m.id)}">Manual &amp; intent</a></div>`).join("")}</div>`
+          : `<div class="card"><p class="muted">No modules installed. See <code>modules/RULES.md</code> to create one.</p></div>`}
+        <p class="muted small-note">Run with <code>python -m app --core-only</code> to start without modules.</p>`;
+      return;
+    }
+    const m = mods.find((x) => x.id === moduleId);
+    main.innerHTML = `<div class="spinner">Loading…</div>`;
+    const [manual, readme] = await Promise.all(["manual", "readme"].map((d) => api.text(`/api/modules/${moduleId}/docs/${d}`).catch(() => null)));
+    if (stale(token)) return;
+    main.innerHTML = `<div class="page-head"><div><h1>${esc(m?.name || moduleId)}</h1>
+        <div class="sub">${m ? `${badge(m)} v${esc(m.version || "?")} · owner ${owner(m)}` : "not installed"} · <a href="#/modules">All modules</a></div></div></div>
+      <div class="grid two docs-grid">
+        <div class="card md"><h2><span>Manual</span></h2>${manual ? markdown(manual, { dropTitle: true }) : '<p class="muted">No manual.</p>'}</div>
+        <div class="card md"><h2><span>Intent</span><span class="muted" style="font-weight:400">README.md</span></h2>${readme ? markdown(readme, { dropTitle: true }) : '<p class="muted">No README.</p>'}</div>
+      </div>`;
+  }
+
   // ------------------------------------------------------------------ router
   function route() {
     document.body.classList.remove("map-open");
+    const mod = location.hash.match(/^#\/m\/([a-z0-9_-]+)(?:\?(.*))?$/);
+    if (mod) { setTab(`page:${mod[1]}`); renderModulePage(mod[1], mod[2]); return; }
+    const docs = location.hash.match(/^#\/modules(?:\/([a-z0-9_]+))?$/);
+    if (docs) { setTab("modules"); renderModulesPage(docs[1]); return; }
     if (location.hash.startsWith("#/segment")) {
       setTab("segments");
       const sm = location.hash.match(/^#\/segment\/(\d+)/);
@@ -1372,5 +1643,8 @@
     renderActivity(Number(m[1]), win, { laps: q.get("laps") === "1", effort: q.has("effort") ? Number(q.get("effort")) : null });
   }
   window.addEventListener("hashchange", route);
-  loadSports().then(() => Promise.all([loadList(), loadSegments()])).then(route).catch((e) => { main.innerHTML = `<div class="welcome"><h1>Cannot reach the server</h1><p class="muted">${esc(e.message)}</p></div>`; });
+  $("#tag-filter").addEventListener("change", (e) => { state.tagFilter = e.target.value; renderList(); });
+  loadSports()
+    .then(() => Promise.all([loadList(), loadSegments(), loadTags(), loadModules()]))
+    .then(route).catch((e) => { main.innerHTML = `<div class="welcome"><h1>Cannot reach the server</h1><p class="muted">${esc(e.message)}</p></div>`; });
 })();

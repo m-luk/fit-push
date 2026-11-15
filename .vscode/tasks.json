@@ -33,6 +33,26 @@
             "args": ["${workspaceFolder}/scripts/run.py", "--tests"],
             "problemMatcher": [],
             "group": { "kind": "test", "isDefault": true }
+        },
+        {
+            "label": "fit-git: run (core only)",
+            "detail": "Start the app without any modules",
+            "type": "process",
+            "command": "python3",
+            "windows": { "command": "python" },
+            "args": ["${workspaceFolder}/scripts/run.py", "--core-only"],
+            "problemMatcher": [],
+            "presentation": { "reveal": "always", "panel": "dedicated" }
+        },
+        {
+            "label": "fit-git: lint + types",
+            "detail": "ruff check, ruff format --check, ty check, module rules",
+            "type": "process",
+            "command": "${workspaceFolder}/.venv/bin/python",
+            "windows": { "command": "${workspaceFolder}\\.venv\\Scripts\\python.exe" },
+            "args": ["-c", "import subprocess, sys; sys.exit(max(subprocess.call(c) for c in ([sys.executable, \"-m\", \"ruff\", \"check\", \".\"], [sys.executable, \"-m\", \"ruff\", \"format\", \"--check\", \".\"], [sys.executable, \"-m\", \"ty\", \"check\"], [sys.executable, \"scripts/modules.py\", \"check\"])))"],
+            "options": { "cwd": "${workspaceFolder}" },
+            "problemMatcher": []
         }
     ]
 }

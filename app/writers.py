@@ -4,6 +4,7 @@ Input is the column dict used everywhere else (``t`` = epoch seconds, ``None``
 for missing samples), normally already windowed via
 ``analytics.window_columns``.
 """
+
 from __future__ import annotations
 
 import struct
@@ -36,6 +37,7 @@ def _rows(cols: dict) -> list[dict]:
 
 
 # --------------------------------------------------------------------------- GPX
+
 
 def to_gpx(cols: dict, name: str, sport: str) -> bytes:
     out = [
@@ -76,8 +78,6 @@ def to_gpx(cols: dict, name: str, sport: str) -> bytes:
 # --------------------------------------------------------------------------- TCX
 
 
-
-
 def to_tcx(cols: dict, name: str, sport: str, distance: list[float]) -> bytes:
     rows = _rows(cols)
     if not rows or rows[0]["t"] is None:
@@ -98,8 +98,10 @@ def to_tcx(cols: dict, name: str, sport: str, distance: list[float]) -> bytes:
             continue
         s = f"<Trackpoint><Time>{_iso(p['t'])}</Time>"
         if p["lat"] is not None and p["lon"] is not None:
-            s += (f"<Position><LatitudeDegrees>{p['lat']:.7f}</LatitudeDegrees>"
-                  f"<LongitudeDegrees>{p['lon']:.7f}</LongitudeDegrees></Position>")
+            s += (
+                f"<Position><LatitudeDegrees>{p['lat']:.7f}</LatitudeDegrees>"
+                f"<LongitudeDegrees>{p['lon']:.7f}</LongitudeDegrees></Position>"
+            )
         if p["ele"] is not None:
             s += f"<AltitudeMeters>{p['ele']:.1f}</AltitudeMeters>"
         s += f"<DistanceMeters>{d:.1f}</DistanceMeters>"
@@ -115,21 +117,44 @@ def to_tcx(cols: dict, name: str, sport: str, distance: list[float]) -> bytes:
         if tpx:
             s += f"<Extensions><ns3:TPX>{tpx}</ns3:TPX></Extensions>"
         out.append(s + "</Trackpoint>\n")
-    out.append(f"</Track></Lap><Notes>{escape(name)}</Notes>"
-               "<Creator><Name>fit-git</Name></Creator></Activity></Activities>\n"
-               "</TrainingCenterDatabase>\n")
+    out.append(
+        f"</Track></Lap><Notes>{escape(name)}</Notes>"
+        "<Creator><Name>fit-git</Name></Creator></Activity></Activities>\n"
+        "</TrainingCenterDatabase>\n"
+    )
     return "".join(out).encode()
 
 
 # --------------------------------------------------------------------------- FIT
 
-_CRC_TABLE = [0x0000, 0xCC01, 0xD801, 0x1400, 0xF001, 0x3C00, 0x2800, 0xE401,
-              0xA001, 0x6C00, 0x7800, 0xB401, 0x5000, 0x9C01, 0x8801, 0x4400]
+_CRC_TABLE = [
+    0x0000,
+    0xCC01,
+    0xD801,
+    0x1400,
+    0xF001,
+    0x3C00,
+    0x2800,
+    0xE401,
+    0xA001,
+    0x6C00,
+    0x7800,
+    0xB401,
+    0x5000,
+    0x9C01,
+    0x8801,
+    0x4400,
+]
 FIT_EPOCH = 631065600  # 1989-12-31T00:00:00Z
 
 # base types: (code, struct fmt, invalid value)
-ENUM, UINT8, UINT16, SINT32, UINT32 = (0x00, "B", 0xFF), (0x02, "B", 0xFF), \
-    (0x84, "H", 0xFFFF), (0x85, "i", 0x7FFFFFFF), (0x86, "I", 0xFFFFFFFF)
+ENUM, UINT8, UINT16, SINT32, UINT32 = (
+    (0x00, "B", 0xFF),
+    (0x02, "B", 0xFF),
+    (0x84, "H", 0xFFFF),
+    (0x85, "i", 0x7FFFFFFF),
+    (0x86, "I", 0xFFFFFFFF),
+)
 SINT8 = (0x01, "b", 0x7F)
 
 
@@ -187,14 +212,42 @@ def to_fit(cols: dict, name: str, sport: str, distance: list[float]) -> bytes:
 
     file_id = _FitMessage(0, 0, [(0, ENUM), (1, UINT16), (2, UINT16), (4, UINT32)])
     event = _FitMessage(1, 21, [(253, UINT32), (0, ENUM), (1, ENUM)])
-    record = _FitMessage(2, 20, [
-        (253, UINT32), (0, SINT32), (1, SINT32), (2, UINT16), (3, UINT8), (4, UINT8),
-        (5, UINT32), (6, UINT16), (7, UINT16), (13, SINT8),
-    ])
-    lap = _FitMessage(3, 19, [(253, UINT32), (2, UINT32), (7, UINT32), (8, UINT32), (9, UINT32),
-                              (0, ENUM), (1, ENUM), (25, ENUM)])
-    session = _FitMessage(4, 18, [(253, UINT32), (2, UINT32), (7, UINT32), (8, UINT32), (9, UINT32),
-                                  (5, ENUM), (6, ENUM), (0, ENUM), (1, ENUM), (25, UINT16), (26, UINT16)])
+    record = _FitMessage(
+        2,
+        20,
+        [
+            (253, UINT32),
+            (0, SINT32),
+            (1, SINT32),
+            (2, UINT16),
+            (3, UINT8),
+            (4, UINT8),
+            (5, UINT32),
+            (6, UINT16),
+            (7, UINT16),
+            (13, SINT8),
+        ],
+    )
+    lap = _FitMessage(
+        3, 19, [(253, UINT32), (2, UINT32), (7, UINT32), (8, UINT32), (9, UINT32), (0, ENUM), (1, ENUM), (25, ENUM)]
+    )
+    session = _FitMessage(
+        4,
+        18,
+        [
+            (253, UINT32),
+            (2, UINT32),
+            (7, UINT32),
+            (8, UINT32),
+            (9, UINT32),
+            (5, ENUM),
+            (6, ENUM),
+            (0, ENUM),
+            (1, ENUM),
+            (25, UINT16),
+            (26, UINT16),
+        ],
+    )
     activity = _FitMessage(5, 34, [(253, UINT32), (0, UINT32), (1, UINT16), (2, ENUM), (3, ENUM), (4, ENUM)])
 
     body = bytearray()
@@ -209,16 +262,21 @@ def to_fit(cols: dict, name: str, sport: str, distance: list[float]) -> bytes:
             p["lat"] * semi if p["lat"] is not None else None,
             p["lon"] * semi if p["lon"] is not None else None,
             (ele + 500) * 5 if ele is not None else None,
-            p["hr"], p["cad"],
+            p["hr"],
+            p["cad"],
             (d - d0) * 100 if d is not None else None,
             p["speed"] * 1000 if p["speed"] is not None else None,
-            p["power"], p["temp"],
+            p["power"],
+            p["temp"],
         )
     ts1 = _fit_ts(t1)
     body += event.data(ts1, 0, 4)  # timer stop_all
-    body += lap.definition + lap.data(ts1, _fit_ts(t0), elapsed * 1000, elapsed * 1000, total_dist * 100, 9, 1, sport_id)
-    body += session.definition + session.data(ts1, _fit_ts(t0), elapsed * 1000, elapsed * 1000, total_dist * 100,
-                                              sport_id, sub_sport_id, 8, 1, 0, 1)
+    body += lap.definition + lap.data(
+        ts1, _fit_ts(t0), elapsed * 1000, elapsed * 1000, total_dist * 100, 9, 1, sport_id
+    )
+    body += session.definition + session.data(
+        ts1, _fit_ts(t0), elapsed * 1000, elapsed * 1000, total_dist * 100, sport_id, sub_sport_id, 8, 1, 0, 1
+    )
     body += activity.definition + activity.data(ts1, elapsed * 1000, 1, 0, 26, 1)
 
     header = struct.pack("<BBHI4s", 14, 0x20, 2132, len(body), b".FIT")

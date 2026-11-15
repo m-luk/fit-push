@@ -1,0 +1,75 @@
+[project]
+name = "fit-git"
+version = "0.2.0"
+description = "Local web app to analyse and visualise sports activity files (FIT, GPX, TCX)"
+requires-python = ">=3.10"
+readme = "README.md"
+
+# ----------------------------------------------------------------------------- pytest
+[tool.pytest.ini_options]
+testpaths = ["tests", "modules"]
+pythonpath = ["."]
+addopts = "-p no:cacheprovider"
+filterwarnings = [
+    "ignore:Using `httpx` with `starlette.testclient` is deprecated",
+]
+
+# ----------------------------------------------------------------------------- ruff
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+extend-exclude = ["modules/_template"]
+
+[tool.ruff.format]
+quote-style = "double"
+docstring-code-format = true
+
+[tool.ruff.lint]
+select = [
+    "E", "W",   # pycodestyle
+    "F",        # pyflakes: unused imports/variables, undefined names
+    "I",        # import sorting
+    "B",        # bugbear: likely bugs
+    "UP",       # pyupgrade: modern syntax for the target version
+    "SIM",      # simplifications
+    "C4",       # comprehensions
+    "RUF",      # ruff-specific checks
+    "PIE",      # misc. lints (unnecessary pass, duplicate keys)
+    "T20",      # no print() in library code (allowed in scripts, below)
+    "PT",       # pytest style
+]
+ignore = [
+    "E501",     # line length is the formatter's job; long strings/URLs are fine
+    "B008",     # FastAPI uses calls (Query/Depends/File) as defaults by design
+    "RUF001", "RUF002", "RUF003",  # typographic characters (×, –, ’) are intentional in UI text
+    "SIM108",   # ternaries are not always clearer
+    "PT011",    # pytest.raises(ValueError) without match is fine for our domain errors
+    "PT018",    # composite asserts read fine in these tests
+    "PT006",    # parametrize names as a comma string are fine
+    "B905",     # zip() over columns that are equal-length by construction
+    "RUF046",   # int(round(x)): round() of a numpy scalar is not reliably a Python int
+]
+
+[tool.ruff.lint.per-file-ignores]
+"scripts/*" = ["T20"]
+"app/__main__.py" = ["T20"]
+".claude/**" = ["T20"]
+"tests/**" = ["T20"]
+"modules/*/tests/*" = ["T20"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app", "tests"]
+
+# ----------------------------------------------------------------------------- ty
+[tool.ty.environment]
+python-version = "3.10"
+root = ["."]
+
+[tool.ty.src]
+include = ["app", "scripts", "modules", "tests", "conftest.py"]
+exclude = ["modules/_template"]
+
+[tool.ty.rules]
+# numpy/fastapi stubs make a few checks noisy; keep them visible without failing CI
+possibly-missing-attribute = "warn"
+possibly-missing-import = "warn"

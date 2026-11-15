@@ -1,0 +1,17 @@
+// __NAME__ (frontend): registers a page at #/m/__ID__. Uses only window.fitgit (docs/SDK.md).
+(() => {
+  "use strict";
+  const sdk = window.fitgit;
+
+  sdk.registerPage({
+    module: "__ID__",
+    label: "__NAME__",
+    icon: "🧩",
+    async render(el, ctx) {
+      const data = await sdk.api("/api/m/__ID__/hello");
+      if (ctx.isStale()) return; // the user navigated away while we were loading
+      el.innerHTML = `<div class="page-head"><div><h1>${sdk.esc("__NAME__")}</h1>
+        <div class="sub">TODO replace: ${data.activities} activities</div></div></div>`;
+    },
+  });
+})();

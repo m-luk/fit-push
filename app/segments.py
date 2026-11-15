@@ -9,6 +9,7 @@ efforts on the same segment, e.g. one per lap.
 
 Indices refer to the cleaned point sequence (see ``analytics.window_columns``).
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -16,13 +17,13 @@ import numpy as np
 from .analytics import _prepare, analyse, window_columns
 
 EARTH_R = 6_371_000.0
-ENDPOINT_RADIUS = 25.0      # how close an effort must pass the segment start / end (m)
-CORRIDOR = 30.0             # 95 % of points must stay within this of the other line (m)
+ENDPOINT_RADIUS = 25.0  # how close an effort must pass the segment start / end (m)
+CORRIDOR = 30.0  # 95 % of points must stay within this of the other line (m)
 LENGTH_RANGE = (0.8, 1.25)  # effort GPS length vs segment GPS length
 MIN_SEGMENT_M = 100.0
-GEOMETRY_STEP_M = 5.0       # stored segment line: a point every ~5 m ...
-MAX_SEGMENT_POINTS = 20_000 # ... up to 100 km
-COMPARE_STEP_M = 10.0       # both lines are compared at this spacing, whatever their length
+GEOMETRY_STEP_M = 5.0  # stored segment line: a point every ~5 m ...
+MAX_SEGMENT_POINTS = 20_000  # ... up to 100 km
+COMPARE_STEP_M = 10.0  # both lines are compared at this spacing, whatever their length
 
 
 class SegmentError(ValueError):
@@ -100,8 +101,12 @@ def _near_runs(dd: np.ndarray, radius: float) -> list[int]:
 
 
 def _bbox_overlaps(seg_bbox, lat, lon, margin_deg=0.001) -> bool:
-    return not (np.nanmax(lat) < seg_bbox[0] - margin_deg or np.nanmin(lat) > seg_bbox[2] + margin_deg
-                or np.nanmax(lon) < seg_bbox[1] - margin_deg or np.nanmin(lon) > seg_bbox[3] + margin_deg)
+    return not (
+        np.nanmax(lat) < seg_bbox[0] - margin_deg
+        or np.nanmin(lat) > seg_bbox[2] + margin_deg
+        or np.nanmax(lon) < seg_bbox[1] - margin_deg
+        or np.nanmin(lon) > seg_bbox[3] + margin_deg
+    )
 
 
 def find_efforts(segment: dict, cols: dict[str, list]) -> list[tuple[int, int]]:
@@ -138,7 +143,7 @@ def find_efforts(segment: dict, cols: dict[str, list]) -> list[tuple[int, int]]:
                 continue
             if ratio > LENGTH_RANGE[1]:
                 break
-            if _follows(x[i:j + 1], y[i:j + 1], rsx, rsy):
+            if _follows(x[i : j + 1], y[i : j + 1], rsx, rsy):
                 efforts.append((int(gps[i]), int(gps[j])))
                 busy_end = j
                 break
@@ -150,12 +155,21 @@ def _follows(ex, ey, sx, sy) -> bool:
     if len(ex) < 2:
         return False
     rx, ry = _resample(ex, ey)
-    return (_near_fraction(rx, ry, sx, sy, CORRIDOR) >= 0.95
-            and _near_fraction(sx, sy, rx, ry, CORRIDOR) >= 0.95)
+    return _near_fraction(rx, ry, sx, sy, CORRIDOR) >= 0.95 and _near_fraction(sx, sy, rx, ry, CORRIDOR) >= 0.95
 
 
-EFFORT_FIELDS = ("start_time", "elapsed_s", "moving_s", "distance_m", "avg_speed_ms",
-                 "avg_hr", "max_hr", "avg_power", "avg_cadence", "elev_gain_m")
+EFFORT_FIELDS = (
+    "start_time",
+    "elapsed_s",
+    "moving_s",
+    "distance_m",
+    "avg_speed_ms",
+    "avg_hr",
+    "max_hr",
+    "avg_power",
+    "avg_cadence",
+    "elev_gain_m",
+)
 
 
 def effort_stats(cols: dict[str, list], start: int, end: int, sport: str) -> dict:

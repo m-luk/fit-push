@@ -1,0 +1,64 @@
+stages:
+  - lint
+  - test
+  - ui
+
+variables:
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+
+default:
+  image: python:3.12-slim
+  cache:
+    key:
+      files: [requirements.txt, requirements-dev.txt]
+    paths: [.cache/pip]
+
+.install: &install
+  - pip install -r requirements-dev.txt
+
+lint:
+  stage: lint
+  script:
+    - *install
+    - ruff check --output-format=gitlab --output-file=gl-code-quality-report.json .
+    - ruff format --check .
+    - ty check --python "$(python -c 'import sys; print(sys.prefix)')"
+  artifacts:
+    when: always
+    reports:
+      codequality: gl-code-quality-report.json
+
+javascript:
+  stage: lint
+  image: node:20-slim
+  cache: []
+  script:
+    - for f in app/static/app.js modules/*/frontend.js; do node --check "$f"; done
+
+# The core suite runs twice through the `client` fixture: core-only and with all modules.
+test:
+  stage: test
+  parallel:
+    matrix:
+      - PY: ["3.10", "3.12", "3.13"]
+  image: python:${PY}-slim
+  script:
+    - *install
+    - python -m pytest -q --junitxml=report.xml
+    - python scripts/modules.py check
+  artifacts:
+    when: always
+    reports:
+      junit: report.xml
+
+ui-smoke:
+  stage: ui
+  image: mcr.microsoft.com/playwright/python:v1.49.0-noble
+  script:
+    - pip install -r requirements-dev.txt playwright==1.49.0
+    - python .claude/skills/ui-verify/scripts/ui_smoke.py --out shots --channel bundled
+    - python .claude/skills/ui-verify/scripts/ui_smoke.py --out shots-core --channel bundled --core-only --port 8791
+  artifacts:
+    when: always
+    paths: [shots, shots-core]
+    expire_in: 1 week

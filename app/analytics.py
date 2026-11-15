@@ -3,10 +3,12 @@
 Points are stored column-wise (``{"t": [...], "lat": [...], ...}``) with
 ``None`` for missing samples; ``t`` is UNIX epoch seconds.
 """
+
 from __future__ import annotations
 
 import math
 from datetime import datetime, timezone
+from typing import Any
 
 import numpy as np
 
@@ -25,6 +27,7 @@ MAX_TRACK_POINTS = 2500
 
 
 # --------------------------------------------------------------------------- conversion
+
 
 def activity_to_columns(act: Activity) -> dict[str, list]:
     cols: dict[str, list] = {c: [] for c in CHANNELS}
@@ -115,8 +118,9 @@ def _centered_median(a: np.ndarray, window: int = 5) -> np.ndarray:
 
 # --------------------------------------------------------------------------- preparation
 
-def _prepare(cols: dict[str, list]) -> dict[str, np.ndarray]:
-    a = {c: _arr(cols.get(c, [])) for c in CHANNELS}
+
+def _prepare(cols: dict[str, list]) -> dict[str, Any]:
+    a: dict[str, Any] = {c: _arr(cols.get(c, [])) for c in CHANNELS}
     n = len(a["t"])
     for c in CHANNELS:
         if len(a[c]) != n:
@@ -158,7 +162,7 @@ def window_columns(cols: dict[str, list], start: int | None = None, end: int | N
     end = n - 1 if end is None else end
     if not (0 <= start < end < n):
         raise ValueError(f"invalid window {start}..{end} for {n} points")
-    return _to_lists({c: a[c][start:end + 1] for c in CHANNELS})
+    return _to_lists({c: a[c][start : end + 1] for c in CHANNELS})
 
 
 def cumulative_distance(cols: dict[str, list]) -> list[float]:
@@ -238,11 +242,13 @@ def _best_efforts(dist: np.ndarray, t: np.ndarray, targets) -> list[dict]:
         t_end = np.interp(dist[starts] + target, dist, t)
         dur = t_end - t[starts]
         i = int(np.argmin(dur))
-        out.append({
-            "distance_m": target,
-            "time_s": round(float(dur[i]), 1),
-            "start_offset_s": round(float(t[starts][i] - t[0]), 1),
-        })
+        out.append(
+            {
+                "distance_m": target,
+                "time_s": round(float(dur[i]), 1),
+                "start_offset_s": round(float(t[starts][i] - t[0]), 1),
+            }
+        )
     return out
 
 
@@ -250,7 +256,7 @@ def _splits(dist, moving_time, ele_s, hr, power, unit_m=1000.0) -> list[dict]:
     total = dist[-1]
     if total < unit_m * 0.05:
         return []
-    bounds = list(np.arange(0, total, unit_m)) + [total]
+    bounds = [*list(np.arange(0, total, unit_m)), total]
     if len(bounds) > 1 and bounds[-1] - bounds[-2] < 1:
         bounds.pop(-2)
     mt_at = np.interp(bounds, dist, moving_time)
@@ -262,15 +268,17 @@ def _splits(dist, moving_time, ele_s, hr, power, unit_m=1000.0) -> list[dict]:
         gain = float(np.sum(np.clip(np.diff(seg_ele), 0, None))) if np.isfinite(seg_ele).sum() > 1 else None
         seg_dist = float(hi - lo)
         seg_t = float(mt_at[k + 1] - mt_at[k])
-        out.append({
-            "index": k + 1,
-            "distance_m": round(seg_dist, 1),
-            "moving_s": round(seg_t, 1),
-            "speed_ms": _num(seg_dist / seg_t, 3) if seg_t > 0 else None,
-            "elev_gain_m": _num(gain),
-            "avg_hr": _num(np.nanmean(hr[mask])) if np.isfinite(hr[mask]).any() else None,
-            "avg_power": _num(np.nanmean(power[mask])) if np.isfinite(power[mask]).any() else None,
-        })
+        out.append(
+            {
+                "index": k + 1,
+                "distance_m": round(seg_dist, 1),
+                "moving_s": round(seg_t, 1),
+                "speed_ms": _num(seg_dist / seg_t, 3) if seg_t > 0 else None,
+                "elev_gain_m": _num(gain),
+                "avg_hr": _num(np.nanmean(hr[mask])) if np.isfinite(hr[mask]).any() else None,
+                "avg_power": _num(np.nanmean(power[mask])) if np.isfinite(power[mask]).any() else None,
+            }
+        )
     return out
 
 
@@ -288,8 +296,10 @@ def _series_list(values: np.ndarray, idx: np.ndarray, nd=1):
 
 # --------------------------------------------------------------------------- main entry
 
-def analyse(cols: dict[str, list], sport: str = "unknown", settings: dict | None = None,
-            split_m: float = 1000.0) -> dict:
+
+def analyse(
+    cols: dict[str, list], sport: str = "unknown", settings: dict | None = None, split_m: float = 1000.0
+) -> dict:
     s = {**DEFAULT_SETTINGS, **(settings or {})}
     a = _prepare(cols)
     n = len(a["t"])
@@ -403,10 +413,7 @@ def analyse(cols: dict[str, list], sport: str = "unknown", settings: dict | None
         summary["work_kj"] = _num(float(np.nansum(np.nan_to_num(power) * np.clip(dt, 0, 10))) / 1000, 0)
         power_curve = _best_averages(p1, POWER_CURVE_DURATIONS)
 
-    best_efforts = (
-        _best_efforts(dist, t, sports.get(sport).efforts)
-        if has_time and dist[-1] > 0 else []
-    )
+    best_efforts = _best_efforts(dist, t, sports.get(sport).efforts) if has_time and dist[-1] > 0 else []
     splits = _splits(dist, moving_time, ele_s, hr, power, split_m) if has_time and dist[-1] > 0 else []
 
     # Series for charts (downsampled)
@@ -430,8 +437,7 @@ def analyse(cols: dict[str, list], sport: str = "unknown", settings: dict | None
     if has_gps:
         tidx = _downsample_idx(n, MAX_TRACK_POINTS)
         ok = np.isfinite(a["lat"][tidx]) & np.isfinite(a["lon"][tidx])
-        track = [[round(float(la), 6), round(float(lo), 6)]
-                 for la, lo in zip(a["lat"][tidx][ok], a["lon"][tidx][ok])]
+        track = [[round(float(la), 6), round(float(lo), 6)] for la, lo in zip(a["lat"][tidx][ok], a["lon"][tidx][ok])]
 
     return {
         "summary": summary,

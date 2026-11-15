@@ -1,0 +1,16 @@
+"""Tests for the __ID__ module. Run: python -m pytest modules/__ID__ -q"""
+from tests.helpers import upload
+from tests.samples import synthetic_track, to_gpx
+
+
+def test_hello(make_client):
+    client = make_client(modules="__ID__")
+    upload(client, "run.gpx", to_gpx(synthetic_track()))
+    assert client.get("/api/m/__ID__/hello").json()["activities"] == 1
+
+
+def test_core_still_works_with_module(make_client):
+    client = make_client(modules="__ID__")
+    assert client.get("/api/activities").status_code == 200
+    status = {m["id"]: m["status"] for m in client.get("/api/modules").json()}
+    assert status["__ID__"] == "loaded"

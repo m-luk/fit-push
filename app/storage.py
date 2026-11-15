@@ -1,4 +1,5 @@
 """SQLite persistence. Raw points are stored zlib-compressed as column JSON."""
+
 from __future__ import annotations
 
 import json
@@ -47,6 +48,12 @@ CREATE TABLE IF NOT EXISTS segment_efforts (
 );
 CREATE INDEX IF NOT EXISTS ix_efforts_segment ON segment_efforts(segment_id, elapsed_s);
 CREATE INDEX IF NOT EXISTS ix_efforts_activity ON segment_efforts(activity_id);
+CREATE TABLE IF NOT EXISTS activity_tags (
+    activity_id INTEGER NOT NULL REFERENCES activities(id) ON DELETE CASCADE,
+    tag TEXT NOT NULL,
+    PRIMARY KEY (activity_id, tag)
+);
+CREATE INDEX IF NOT EXISTS ix_tags_tag ON activity_tags(tag);
 """
 
 LIST_COLUMNS = "id, filename, source_format, device, name, sport, start_time, created_at, summary"
@@ -94,26 +101,72 @@ class Store:
             cur = c.execute(
                 "INSERT INTO activities (sha256, filename, source_format, device, name, sport,"
                 " start_time, created_at, summary, points) VALUES (?,?,?,?,?,?,?,?,?,?)",
-                (sha256, filename, source_format, device, name, sport, summary.get("start_time"),
-                 datetime.now(timezone.utc).isoformat(), json.dumps(summary), blob),
+                (
+                    sha256,
+                    filename,
+                    source_format,
+                    device,
+                    name,
+                    sport,
+                    summary.get("start_time"),
+                    datetime.now(timezone.utc).isoformat(),
+                    json.dumps(summary),
+                    blob,
+                ),
             )
             return cur.lastrowid
 
-    def list(self, sport: str | None = None) -> list[dict]:
+    def list_activities(self, sport: str | None = None, tag: str | None = None) -> list[dict]:
         q = f"SELECT {LIST_COLUMNS} FROM activities"
-        args: tuple = ()
+        where, args = [], []
         if sport:
-            q += " WHERE sport = ?"
-            args = (sport,)
+            where.append("sport = ?")
+            args.append(sport)
+        if tag:
+            where.append("id IN (SELECT activity_id FROM activity_tags WHERE tag = ?)")
+            args.append(tag)
+        if where:
+            q += " WHERE " + " AND ".join(where)
         q += " ORDER BY COALESCE(start_time, created_at) DESC"
         with self._tx() as c:
-            return [self._row(r) for r in c.execute(q, args).fetchall()]
+            rows = [self._row(r) for r in c.execute(q, args).fetchall()]
+            tags = self._tags_by_activity(c)
+        for r in rows:
+            r["tags"] = tags.get(r["id"], [])
+        return rows
 
     def get(self, activity_id: int, with_points=True) -> dict | None:
         cols = "*" if with_points else LIST_COLUMNS
         with self._tx() as c:
             r = c.execute(f"SELECT {cols} FROM activities WHERE id = ?", (activity_id,)).fetchone()
-        return self._row(r, with_points) if r else None
+            if not r:
+                return None
+            row = self._row(r, with_points)
+            row["tags"] = self._tags_by_activity(c, activity_id).get(activity_id, [])
+        return row
+
+    # ---------------------------------------------------------------- tags
+    @staticmethod
+    def _tags_by_activity(c, activity_id: int | None = None) -> dict[int, list[str]]:
+        q, args = "SELECT activity_id, tag FROM activity_tags", ()
+        if activity_id is not None:
+            q, args = q + " WHERE activity_id = ?", (activity_id,)
+        out: dict[int, list[str]] = {}
+        for r in c.execute(q + " ORDER BY tag", args).fetchall():
+            out.setdefault(r["activity_id"], []).append(r["tag"])
+        return out
+
+    def set_tags(self, activity_id: int, tags: list[str]) -> None:
+        with self._tx() as c:
+            c.execute("DELETE FROM activity_tags WHERE activity_id = ?", (activity_id,))
+            c.executemany(
+                "INSERT INTO activity_tags (activity_id, tag) VALUES (?, ?)", [(activity_id, t) for t in tags]
+            )
+
+    def all_tags(self) -> list[dict]:
+        with self._tx() as c:
+            rows = c.execute("SELECT tag, COUNT(*) AS count FROM activity_tags GROUP BY tag ORDER BY tag").fetchall()
+        return [dict(r) for r in rows]
 
     def update(self, activity_id: int, **fields) -> None:
         allowed = {"name", "sport", "summary", "start_time"}
@@ -143,8 +196,11 @@ class Store:
     def set_settings(self, values: dict) -> dict:
         with self._tx() as c:
             for k, v in values.items():
-                c.execute("INSERT INTO settings (key, value) VALUES (?, ?) "
-                          "ON CONFLICT(key) DO UPDATE SET value = excluded.value", (k, json.dumps(v)))
+                c.execute(
+                    "INSERT INTO settings (key, value) VALUES (?, ?) "
+                    "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                    (k, json.dumps(v)),
+                )
         return self.get_settings()
 
     # ---------------------------------------------------------------- segments
@@ -189,8 +245,10 @@ class Store:
             c.executemany(
                 "INSERT INTO segment_efforts (segment_id, activity_id, start_idx, end_idx, elapsed_s, stats)"
                 " VALUES (?,?,?,?,?,?)",
-                [(segment_id, activity_id, e["start"], e["end"], e["stats"].get("elapsed_s"), json.dumps(e["stats"]))
-                 for e in efforts],
+                [
+                    (segment_id, activity_id, e["start"], e["end"], e["stats"].get("elapsed_s"), json.dumps(e["stats"]))
+                    for e in efforts
+                ],
             )
 
     _EFFORT_SELECT = """
@@ -215,3 +273,16 @@ class Store:
     def efforts_for_activity(self, activity_id: int) -> list[dict]:
         rows = self._efforts("activity_id = ?", activity_id)
         return sorted(rows, key=lambda r: r["start"])
+
+    # ---------------------------------------------------------------- raw access (module SDK)
+    def run(self, sql: str, args: tuple | list = (), *, script: bool = False) -> list[dict]:
+        """Execute SQL under the store lock and return rows as dicts.
+
+        Used by ``app.sdk.ModuleDB``, which restricts writes to the module's own tables.
+        """
+        with self._tx() as c:
+            if script:
+                c.executescript(sql)
+                return []
+            cur = c.execute(sql, args)
+            return [dict(r) for r in cur.fetchall()] if cur.description else []

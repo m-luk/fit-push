@@ -116,6 +116,42 @@ power curve.
 Athlete settings (max HR, resting HR, FTP) drive zones, TRIMP, IF and TSS.
 Saving new settings recalculates every stored activity.
 
+### Tags
+
+Add tags under an activity's title (type and press Enter; pick existing ones from
+the suggestions; × removes). Tags are lower-cased and de-duplicated. Filter the
+sidebar list by tag, and use them in modules (for example the map).
+
+### Sports
+
+Running, cycling (generic, road, gravel, MTB), walking, hiking, skiing, ski
+touring, sailing, kayaking and swimming. Each has its own pace/speed display,
+moving-time threshold and best-effort distances. Sports are recognised from FIT
+sport + sub-sport, Strava/Garmin activity types and TCX; change one with the sport
+picker on the activity page.
+
+## Modules
+
+Optional features live in `modules/<id>/` and plug into the core through a small,
+versioned SDK ([docs/SDK.md](docs/SDK.md)). Each module has an owner (GitHub id), an
+intent (`README.md`), a user manual (`MANUAL.md`) and tests. The **Modules** button
+in the app shows them with their manuals. The registry is
+[modules/INDEX.md](modules/INDEX.md), and all manuals are collected in
+[docs/MODULES_MANUAL.md](docs/MODULES_MANUAL.md).
+
+Installed: **All activities map** (`activity_map`). The **🗺️ Map** tab shows every
+route, filtered by sport, tag and date range, coloured by sport or date.
+
+Writing one: read [modules/RULES.md](modules/RULES.md), then
+
+```bash
+python scripts/modules.py new my_feature --owner <github-id> --name "My feature" --provides page,api
+python scripts/modules.py check my_feature && python scripts/modules.py docs
+```
+
+A module that fails to load or throws is switched off and reported; the core keeps
+running. Start without any modules with `--core-only`.
+
 ## Running
 
 The quickest way is the run script (any OS, any Python 3.10+). It creates
@@ -123,50 +159,72 @@ The quickest way is the run script (any OS, any Python 3.10+). It creates
 change:
 
 ```bash
-python scripts/run.py                        # http://127.0.0.1:8000
+python scripts/run.py                        # http://127.0.0.1:8000, core + modules
+python scripts/run.py --core-only            # without modules (or --modules a,b)
 python scripts/run.py --port 9000 --reload   # --host 0.0.0.0 to expose on the LAN
 python scripts/run.py --tests                # install dev requirements, run pytest
 ```
 
 In VS Code, **Terminal → Run Build Task** (Ctrl+Shift+B) runs `fit-git: run`;
-there are also `fit-git: run (auto-reload)` and `fit-git: tests` tasks.
+there are also *run (auto-reload)*, *run (core only)*, *tests* and *lint + types*.
 
-Manual setup:
-
-```bash
-python -m venv .venv
-.venv\Scripts\activate          # Windows  (source .venv/bin/activate on Linux/macOS)
-pip install -r requirements.txt
-python -m app                   # http://127.0.0.1:8000
-```
-
-Options: `python -m app --host 0.0.0.0 --port 8080 --reload`.
-The database is stored at `data/activities.db`; set `FITGIT_DB` to change the path.
+Manual setup: `python -m venv .venv`, activate it, `pip install -r requirements.txt`,
+`python -m app` (see `python -m app --help`).
 
 Drag files onto the page, or use **Upload**. You can upload many files at
 once, and duplicate files are skipped by content hash.
+
+### Where your data is, and backups
+
+| OS | Data directory |
+|---|---|
+| Windows | `%LOCALAPPDATA%\fit-git` |
+| macOS | `~/Library/Application Support/fit-git` |
+| Linux | `$XDG_DATA_HOME/fit-git` (default `~/.local/share/fit-git`) |
+
+The database is `activities.db` in that directory; `--data-dir` / `FITGIT_DATA_DIR`
+or `--db` / `FITGIT_DB` move it. A database at the old location
+(`data/activities.db` in the repository) is copied there on first start; the old
+file is kept.
+
+Every start first copies the database to `<data dir>/backups/` (the last 10 are
+kept; `FITGIT_BACKUPS` changes the number, `--no-backup` skips it). If something
+breaks your data, stop the app and restore:
+
+```bash
+python scripts/run.py --list-backups
+python scripts/run.py --restore latest       # or a file name from the list
+```
+
+The database you replace is saved as a `…-pre-restore.db` backup first.
 
 ## API
 
 | Method | Path | Description |
 |---|---|---|
 | `POST` | `/api/activities` | multipart upload (`files`, repeatable) |
-| `GET` | `/api/activities?sport=` | list with summaries |
-| `GET` | `/api/activities/{id}?split=km\|mi` | full analysis: summary, series, track, splits, zones, power curve, best efforts |
+| `GET` | `/api/activities?sport=&tag=` | list with summaries and tags |
+| `GET` | `/api/activities/{id}?split=km\|mi` | full analysis: summary, series, track, splits, zones, power curve, best efforts, laps, segment efforts, tags |
 | `GET` | `/api/activities/{id}?start=&end=` | temporary trimmed view (point indices, inclusive; nothing is saved) |
 | `GET` | `/api/activities/{id}/export?format=gpx\|tcx\|fit&start=&end=` | download full activity or trimmed section as a new file |
 | `POST` | `/api/activities/{id}/clip` | `{start, end, name?}`: save section as new activity |
 | `GET` | `/api/activities/{id}/laps` | detected laps with per-lap, lapped-section and whole-activity summaries (404 if none) |
 | `GET` | `/api/activities/{id}/segments` | segment efforts in this activity, with rank |
+| `PUT` | `/api/activities/{id}/tags` | `{tags: [...]}`: replace tags, returns the normalised list |
+| `GET` | `/api/tags` | all tags with counts |
+| `PATCH` | `/api/activities/{id}` | `{name, sport}` |
+| `DELETE` | `/api/activities/{id}` | delete |
 | `POST` | `/api/segments` | `{activity_id, start, end, name?}`: create a segment and match all activities |
 | `GET` | `/api/segments` | list with effort / activity counts and best time |
 | `GET` | `/api/segments/{id}` | geometry, efforts (fastest first) and activities containing it |
 | `PATCH` / `DELETE` | `/api/segments/{id}` | rename / delete (efforts are removed with it) |
 | `POST` | `/api/segments/{id}/rescan` | re-match against every stored activity |
-| `PATCH` | `/api/activities/{id}` | `{name, sport}` |
-| `DELETE` | `/api/activities/{id}` | delete |
 | `GET` | `/api/stats?sport=&period=week\|month` | totals, periods, records, all-time power curve |
 | `GET/PUT` | `/api/settings` | `{max_hr, rest_hr, ftp}` |
+| `GET` | `/api/sports` | sport catalogue |
+| `GET` | `/api/modules` | modules with owner, status and errors |
+| `GET` | `/api/modules/{id}/docs/readme\|manual` | a module's intent / manual (Markdown) |
+| `*` | `/api/m/{module id}/...` | module APIs (see each module's README) |
 
 Interactive docs are at `/docs`.
 
@@ -174,23 +232,32 @@ Interactive docs are at `/docs`.
 
 ```bash
 pip install -r requirements-dev.txt
-pytest
+python -m pytest -q                      # core runs twice: core-only and with all modules
+ruff check . && ruff format --check .    # lint + format
+ty check                                 # types
+python scripts/modules.py check          # module rules + generated docs
 ```
 
-`tests/samples.py` generates synthetic GPX, TCX and binary FIT files, including
-a small FIT encoder, so the tests need no fixture files.
+CI (GitHub Actions and GitLab CI) runs the same gates on Linux, Windows and macOS,
+plus a headless-browser UI smoke test. Conventions for contributors and AI agents
+are in [AGENTS.md](AGENTS.md). `tests/samples.py` generates synthetic GPX, TCX and
+binary FIT files, so the tests need no fixture files.
 
 ## Layout
 
 ```
 app/
+  main.py       app factory: store, core, routers, modules, static files
+  core.py       core service: import, clip, tags, laps, segments, settings, events
+  routes/       thin HTTP routers
+  sdk.py        module SDK;  modules.py  module loader;  events.py  event bus
+  paths.py      data directory and backups
   parsers.py    FIT / GPX / TCX (+gzip) -> Activity(points)
   analytics.py  numpy-based metrics, splits, zones, power curve, best efforts
-  writers.py    GPX / TCX / FIT writers (export, cut to new file)
-  laps.py       repeating-lap detection and per-lap summaries
-  segments.py   segment geometry and effort matching
-  storage.py    SQLite (zlib-compressed point columns)
-  main.py       FastAPI routes + static frontend
-  static/       index.html, app.js (Chart.js + Leaflet), style.css
-tests/
+  laps.py, segments.py, writers.py, sports.py, storage.py
+  static/       index.html, app.js (Chart.js + Leaflet, window.fitgit), style.css
+modules/        optional features (RULES.md, INDEX.md, _template/, <id>/)
+docs/           SDK.md, MODULES_MANUAL.md
+tests/          core/ tests, module contract, helpers, synthetic samples
+scripts/        run.py, modules.py
 ```

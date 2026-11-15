@@ -1,0 +1,12 @@
+{
+  "id": "activity_map",
+  "name": "All activities map",
+  "version": "1.0.0",
+  "summary": "One big map with all your routes, filtered by sport, tag and date, coloured by sport or date",
+  "owner": { "github": "m-luk" },
+  "maintainers": [],
+  "sdk": "1",
+  "provides": ["page", "api"],
+  "depends": [],
+  "enabled_by_default": true
+}

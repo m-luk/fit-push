@@ -1,0 +1,14 @@
+"""__NAME__ (backend): HTTP API under /api/m/__ID__/.
+
+Only ``app.sdk`` may be imported from the core. See docs/SDK.md.
+"""
+from __future__ import annotations
+
+from app.sdk import ModuleContext
+
+
+def register(ctx: ModuleContext) -> None:
+    @ctx.router.get("/hello")
+    def hello() -> dict:
+        """TODO replace: a first endpoint, reachable at /api/m/__ID__/hello."""
+        return {"module": ctx.id, "activities": len(ctx.core.list_activities())}
