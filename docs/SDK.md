@@ -1,4 +1,4 @@
-# fit-push module SDK (version 1)
+# fit-push module SDK (version 1.1)
 
 Everything a module may use from the core. If you need something that is not here,
 do not reach into `app/` internals: propose an SDK addition as a separate core change
@@ -29,6 +29,8 @@ error shows on the Modules page; the core keeps running.
 | `ctx.db` | `ModuleDB`, see below |
 | `ctx.on(event, handler)` | call `handler(**payload)` after a core event |
 | `ctx.log` | `logging.Logger` named `fitpush.module.<id>` |
+| `ctx.provide(name, fn)` | offer `fn` to other modules as a service *(1.1)* |
+| `ctx.service(module_id, name)` | another module's service, or `None` when that module is not loaded *(1.1)* |
 
 ### `ctx.core` (CoreAPI)
 
@@ -44,9 +46,30 @@ error shows on the Modules page; the core keeps running.
 | `tags()` | `[{tag, count}]` |
 | `segments()` | segments (without geometry) with effort counts |
 | `set_tags(id, tags)` | replace an activity's tags (normalised; emits `activity.updated`) |
+| `peek_file(filename, data)` | parse a FIT/GPX/TCX file (optionally `.gz`) without storing it: `{sha256, duplicate_of, name, sport, start_time}`; `duplicate_of` is the id of an activity with the same bytes or `None`. *(1.1)* |
+| `import_file(filename, data)` | import a file like an upload: `{status: "imported" \| "duplicate", id, ...}`; emits `activity.imported` for new ones. *(1.1)* |
+| `update_activity(id, name=None, sport=None)` | rename and/or change the sport (summary, segment efforts refreshed; emits `activity.updated`); returns the activity like `activity()`. *(1.1)* |
 
 Exceptions: `from app.sdk import NotFound, Invalid`. Raising them in a route gives
 HTTP 404 / 422.
+
+`peek_file` and `import_file` raise `Invalid` for files the core cannot read.
+
+### Services between modules *(1.1)*
+
+A module can let others use one of its functions without them touching its tables:
+
+```python
+ctx.provide("assign", assign)  # in module "gear"
+assign = ctx.service("gear", "assign")  # in another module, when needed
+if assign:  # None: gear is not loaded
+    assign(activity_id, gear_id)
+```
+
+Look services up when you use them, not in `register` (load order is only guaranteed
+for modules listed in `depends`). Errors raised by a service propagate to the caller,
+so call them where your own errors are contained (a route or an event handler). A
+provider documents its services in its README; treat them as part of its contract.
 
 ### Events
 

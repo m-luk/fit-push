@@ -28,7 +28,7 @@ from fastapi import APIRouter
 from .analytics import _prepare, analyse, window_columns
 from .core import Core, Invalid, NotFound
 
-SDK_VERSION = "1.0"
+SDK_VERSION = "1.1"
 
 __all__ = ["SDK_VERSION", "CoreAPI", "Invalid", "ModuleContext", "ModuleDB", "NotFound"]
 
@@ -136,6 +136,22 @@ class CoreAPI:
     def set_tags(self, activity_id: int, tags: list[str]) -> list[str]:
         return self._core.set_tags(activity_id, tags)
 
+    def peek_file(self, filename: str, data: bytes) -> dict:
+        """Parse an activity file without storing it: {sha256, duplicate_of, name, sport,
+        start_time}. ``duplicate_of`` is the id of an activity with the same bytes, or None.
+        Raises Invalid for files the core cannot read."""
+        return self._core.peek_file(filename, data)
+
+    def import_file(self, filename: str, data: bytes) -> dict:
+        """Import one activity file like an upload (FIT/GPX/TCX, optionally .gz):
+        {status: "imported" | "duplicate", id, ...}. Raises Invalid for unreadable files."""
+        return self._core.import_file(filename, data)
+
+    def update_activity(self, activity_id: int, name: str | None = None, sport: str | None = None) -> dict:
+        """Rename an activity and/or change its sport (derived data is refreshed, an
+        ``activity.updated`` event is emitted). Returns the activity like ``activity()``."""
+        return self._core.update_activity(activity_id, name, sport)
+
 
 @dataclass
 class ModuleContext:
@@ -146,6 +162,7 @@ class ModuleContext:
     db: ModuleDB
     router: APIRouter
     _on: Callable[[str, Callable], None]
+    _services: dict[str, dict[str, Callable]] = field(default_factory=dict)
     log: logging.Logger = field(init=False)
 
     def __post_init__(self) -> None:
@@ -154,3 +171,14 @@ class ModuleContext:
     def on(self, event: str, handler: Callable) -> None:
         """Call ``handler(**payload)`` after a core event (errors are caught and reported)."""
         self._on(event, handler)
+
+    def provide(self, name: str, fn: Callable) -> None:
+        """Offer ``fn`` to other modules as service ``<this module id>.<name>``."""
+        self._services.setdefault(self.id, {})[name] = fn
+
+    def service(self, module_id: str, name: str) -> Callable | None:
+        """A service another module provides, or None when that module is not loaded.
+
+        Look it up when you need it (not in ``register``): load order is not guaranteed
+        unless the module is listed in ``depends``."""
+        return self._services.get(module_id, {}).get(name)

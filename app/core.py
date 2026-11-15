@@ -11,9 +11,10 @@ from __future__ import annotations
 
 import hashlib
 import re
+from datetime import datetime, timezone
 
 from . import sports, tutorial
-from .analytics import activity_to_columns, analyse, point_count, window_columns
+from .analytics import _prepare, activity_to_columns, analyse, point_count, window_columns
 from .events import EventBus
 from .laps import detect_laps, lap_report
 from .parsers import ParseError, normalise_sport, parse_file
@@ -113,6 +114,27 @@ class Core:
             cols=cols,
         )
         return {"status": "imported", "filename": filename, "id": new_id, "name": act.name, "sport": act.sport}
+
+    def peek_file(self, filename: str, data: bytes) -> dict:
+        """Parse a file without storing it: {sha256, duplicate_of, name, sport, start_time}.
+
+        Lets importers match a file to an activity that came from a different copy of it
+        (same start time, other bytes) before deciding to import.
+        """
+        sha = hashlib.sha256(data).hexdigest()
+        try:
+            act = parse_file(filename, data)
+            t = _prepare(activity_to_columns(act))["t"]
+        except (ParseError, ValueError) as exc:
+            raise Invalid(str(exc)) from exc
+        start = datetime.fromtimestamp(float(t[0]), tz=timezone.utc).isoformat() if len(t) and t[0] == t[0] else None
+        return {
+            "sha256": sha,
+            "duplicate_of": self.store.find_by_hash(sha),
+            "name": act.name,
+            "sport": act.sport,
+            "start_time": start,
+        }
 
     def clip(self, activity_id: int, start: int | None, end: int | None, name: str | None) -> dict:
         """Save points ``start..end`` as a new activity (duplicate-safe)."""

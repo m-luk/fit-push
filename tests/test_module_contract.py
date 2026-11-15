@@ -123,3 +123,70 @@ def test_scaffold_requires_filled_docs(tmp_path, monkeypatch):
     errors, _ = cli.check_module(info)
     assert any("placeholders" in e for e in errors)  # creators must write intent + manual
     assert (tmp_path / "my_mod" / "tests" / "test_my_mod.py").is_file()
+
+
+def test_module_services_and_core_actions(make_client, tmp_path):
+    """Modules can offer services to each other, and import/update activities via the SDK."""
+    mods = tmp_path / "mods"
+    _write_module(
+        mods,
+        "provider",
+        """
+        def register(ctx):
+            ctx.provide("double", lambda x: 2 * x)
+        """,
+    )
+    _write_module(
+        mods,
+        "broken_provider",
+        """
+        def register(ctx):
+            ctx.provide("x", lambda: 1)
+            raise RuntimeError("late failure")
+        """,
+    )
+    _write_module(
+        mods,
+        "consumer",
+        """
+        from fastapi import Request
+
+        from app.sdk import Invalid
+
+        def register(ctx):
+            @ctx.router.get("/svc")
+            def svc():
+                double = ctx.service("provider", "double")
+                return {
+                    "double": double(21) if double else None,
+                    "missing": ctx.service("nope", "x") is None,
+                    "broken": ctx.service("broken_provider", "x") is None,
+                }
+
+            @ctx.router.post("/load")
+            async def load(request: Request):
+                data = await request.body()
+                peek = ctx.core.peek_file("a.gpx", data)
+                first = ctx.core.import_file("a.gpx", data)
+                again = ctx.core.import_file("a.gpx", data)
+                peek2 = ctx.core.peek_file("a.gpx", data)
+                act = ctx.core.update_activity(first["id"], name="Renamed", sport="Hike")
+                try:
+                    ctx.core.peek_file("bad.gpx", b"not xml")
+                    bad = False
+                except Invalid:
+                    bad = True
+                return {"peek": peek, "first": first, "again": again, "peek2": peek2, "act": act, "bad": bad}
+        """,
+    )
+    client = make_client(modules="all", modules_dir=mods)
+    assert client.get("/api/m/consumer/svc").json() == {"double": 42, "missing": True, "broken": True}
+
+    r = client.post("/api/m/consumer/load", content=to_gpx(synthetic_track())).json()
+    assert r["peek"]["duplicate_of"] is None and r["peek"]["start_time"]
+    assert r["first"]["status"] == "imported"
+    assert r["again"] == {**r["again"], "status": "duplicate", "id": r["first"]["id"]}
+    assert r["peek2"]["duplicate_of"] == r["first"]["id"]
+    assert r["peek"]["start_time"] == client.get(f"/api/activities/{r['first']['id']}").json()["start_time"]
+    assert r["act"]["name"] == "Renamed" and r["act"]["sport"] == "hiking"
+    assert r["bad"] is True

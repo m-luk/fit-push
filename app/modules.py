@@ -143,6 +143,8 @@ def load_modules(app: FastAPI, core: Core, spec: str | None = None, directory: P
         log.warning("requested module %r not found", unknown)
 
     loaded: set[str] = set()
+    services: dict = {}  # module id -> {name: fn}, shared by every ModuleContext
+    app.state.module_services = services
     for info in _dependency_order([i for i in infos if i.id in wanted]):
         if info.status == "error":
             continue
@@ -150,7 +152,7 @@ def load_modules(app: FastAPI, core: Core, spec: str | None = None, directory: P
         if missing:
             info.status, info.errors = "error", [f"depends on modules that are not loaded: {', '.join(missing)}"]
             continue
-        if _register(app, core, info):
+        if _register(app, core, info, services):
             loaded.add(info.id)
     for info in infos:
         if info.status == "available":
@@ -177,7 +179,7 @@ def _dependency_order(infos: list[ModuleInfo]) -> list[ModuleInfo]:
     return order
 
 
-def _register(app: FastAPI, core: Core, info: ModuleInfo) -> bool:
+def _register(app: FastAPI, core: Core, info: ModuleInfo, services: dict) -> bool:
     backend = info.dir / "backend.py"
     if backend.is_file():
         router = APIRouter(prefix=f"/api/m/{info.id}", tags=[f"module: {info.id}"])
@@ -189,6 +191,7 @@ def _register(app: FastAPI, core: Core, info: ModuleInfo) -> bool:
             db=ModuleDB(core, info.id),
             router=router,
             _on=lambda ev, fn, _id=info.id: core.events.on(ev, fn, owner=_id),
+            _services=services,
         )
         try:
             spec = importlib.util.spec_from_file_location(f"fitpush_modules.{info.id}", backend)
@@ -203,6 +206,7 @@ def _register(app: FastAPI, core: Core, info: ModuleInfo) -> bool:
         except Exception as exc:
             log.exception("module %s failed to load", info.id)
             core.events.off_owner(info.id)
+            services.pop(info.id, None)
             info.status, info.errors = "error", [f"{type(exc).__name__}: {exc}"]
             return False
         app.include_router(router)

@@ -10,6 +10,8 @@ How to update it: see "Changelog" in `AGENTS.md`.
 
 ### Added
 
+- Module SDK 1.1: modules can import files, rename activities, change their sport and
+  offer services to other modules.
 - **Gear** module: track shoes, bikes, skis, boats and other equipment with total
   distance, moving time, activity count, last use and a "replace after" distance limit.
   Choose default gear for a sport or a whole sport group (e.g. all cycling); new
