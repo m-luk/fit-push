@@ -1264,6 +1264,15 @@
     nav.scrollLeft += r.left - nr.left - (nr.width - r.width) / 2;
   }
 
+  // The sticky sidebar sits below the top bar, whose height depends on wrapping.
+  (() => {
+    const bar = document.querySelector(".topbar");
+    if (!bar || typeof ResizeObserver === "undefined") return;
+    const set = () => document.documentElement.style.setProperty("--topbar-h", `${Math.ceil(bar.getBoundingClientRect().height)}px`);
+    new ResizeObserver(set).observe(bar);
+    set();
+  })();
+
   function setTab(tab) {
     state.tab = tab;
     document.querySelectorAll("[data-tab]").forEach((t) => t.classList.toggle("active", t.dataset.tab === tab));
