@@ -229,7 +229,22 @@
   Chart.register(crosshair);
 
   // ------------------------------------------------------------------ dashboard
+  // Remove the Leaflet map *before* its container leaves the page: a pending zoom/pan
+  // animation on a detached map throws "_leaflet_pos" errors.
+  function disposeMap() {
+    if (!map) return;
+    map.off(); map.stop(); map.remove(); map = null;
+  }
+
+  // Each navigation bumps the token; an async render that finds a newer token after an
+  // await stops, so two overlapping navigations never draw into each other's page.
+  let renderToken = 0;
+  const newRender = () => ++renderToken;
+  const stale = (token) => token !== renderToken;
+
   async function renderDashboard() {
+    const token = newRender();
+    disposeMap();
     destroyCharts();
     state.current = null; renderList();
     if (!state.activities.length) {
@@ -241,6 +256,7 @@
     const q = new URLSearchParams({ period: state.period });
     if (state.sport) q.set("sport", state.sport);
     const st = await api(`/api/stats?${q}`);
+    if (stale(token)) return;
     const t = st.totals;
     const metricDefs = {
       distance_m: { label: `Distance (${u().distL})`, f: (v) => v / u().dist },
@@ -395,6 +411,8 @@
   }
 
   async function renderActivity(id, win, opts = {}) {
+    const token = newRender();
+    disposeMap();
     destroyCharts();
     state.sel = null; state.lap = null; state.lapRange = null; state.effort = null; state.selListeners = [];
     endPick();
@@ -404,7 +422,11 @@
       const lapsReq = opts.laps && win ? api(`/api/activities/${id}/laps`).catch(() => null) : null;
       a = await api(`/api/activities/${id}?split=${u().split}${windowQuery(win)}`);
       laps = await lapsReq;
-    } catch (e) { main.innerHTML = `<div class="welcome"><h1>Not found</h1><p class="muted">${esc(e.message)}</p><a href="#/">Back to dashboard</a></div>`; return; }
+    } catch (e) {
+      if (stale(token)) return;
+      main.innerHTML = `<div class="welcome"><h1>Not found</h1><p class="muted">${esc(e.message)}</p><a href="#/">Back to dashboard</a></div>`; return;
+    }
+    if (stale(token)) return;
     state.current = a; renderList();
     const lapsMode = !!(laps && a.window);
     // Segment efforts inside the current view (indices are absolute, like the window).
@@ -650,7 +672,7 @@
 
   // ------------------------------------------------------------------ map
   function drawMap(a, laps) {
-    if (map) { map.remove(); map = null; }
+    disposeMap();
     const track = a.track;
     map = L.map("map", { scrollWheelZoom: false, preferCanvas: true });
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
@@ -701,7 +723,9 @@
     b.title = on ? "Minimize map (Esc)" : "Enlarge map";
     if (on) map.scrollWheelZoom.enable(); else map.scrollWheelZoom.disable();
     map.invalidateSize({ animate: false });
-    map.fitBounds(selLine ? selLine.getBounds() : trackBounds, { padding: [30, 30] });
+    // No animation: a zoom animation still pending when the page changes makes Leaflet's
+    // transition-end timer run on a removed map ("_leaflet_pos" error).
+    map.fitBounds(selLine ? selLine.getBounds() : trackBounds, { padding: [30, 30], animate: false });
   }
 
   // Colour patterns for the track overlay (stops low -> high). "default" uses the theme tokens:
@@ -1208,13 +1232,15 @@
 
   function leaveActivity() {
     destroyCharts(); endPick();
-    if (map) { map.remove(); map = null; }
+    disposeMap();
     state.current = null; state.sel = null; state.selListeners = [];
   }
 
   async function renderSegmentsPage() {
+    const token = newRender();
     leaveActivity(); state.currentSegment = null;
     await loadSegments(); renderList();
+    if (stale(token)) return;
     const segs = state.segments;
     main.innerHTML = `
       <div class="page-head"><div><h1>Segments</h1>
@@ -1233,11 +1259,13 @@
   }
 
   async function renderSegment(id) {
+    const token = newRender();
     leaveActivity(); renderList();
     main.innerHTML = `<div class="spinner">Loading segment…</div>`;
     let s;
     try { s = await api(`/api/segments/${id}`); }
-    catch (e) { main.innerHTML = `<div class="welcome"><h1>Segment not found</h1><p class="muted">${esc(e.message)}</p><a href="#/segments">All segments</a></div>`; return; }
+    catch (e) { if (stale(token)) return; main.innerHTML = `<div class="welcome"><h1>Segment not found</h1><p class="muted">${esc(e.message)}</p><a href="#/segments">All segments</a></div>`; return; }
+    if (stale(token)) return;
     state.currentSegment = s.id;
     renderSegList();
     const pace = PACE_SPORTS.has(s.sport);
