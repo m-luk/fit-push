@@ -1,6 +1,6 @@
 # Module rules
 
-These rules let many people (and their AI agents) extend fit-git in parallel
+These rules let many people (and their AI agents) extend fit-push in parallel
 without breaking each other or the core, and without anyone having to load the
 whole codebase into context. `python scripts/modules.py check` enforces the
 machine-checkable ones, and CI runs it.
@@ -18,13 +18,13 @@ machine-checkable ones, and CI runs it.
      README.md          intent (written FIRST, before code)
      MANUAL.md          user manual
      backend.py         optional: def register(ctx)
-     frontend.js        optional: registers pages / activity cards via window.fitgit
+     frontend.js        optional: registers pages / activity cards via window.fitpush
      frontend.css       optional
      tests/test_<id>.py required
    ```
    The id is `snake_case` (`[a-z][a-z0-9_]{1,31}`) and equals the folder name.
 3. **Talk to the core only through the SDK** (`docs/SDK.md`): backend imports
-   nothing from `app` except `app.sdk`; frontend uses `window.fitgit` (and the
+   nothing from `app` except `app.sdk`; frontend uses `window.fitpush` (and the
    globals `L`, `Chart`). Need more? Open a separate **core** change that extends the
    SDK (with tests and docs), then use it. Never patch core files in a module change.
 4. **No dependencies on other modules** unless unavoidable. If you must, list them in
@@ -52,9 +52,9 @@ machine-checkable ones, and CI runs it.
 
 11. **Namespaces:** API routes only under `/api/m/<id>/` (use `ctx.router`); database
     tables only `m_<id>_*` (use `ctx.db.table()`); `localStorage` keys
-    `fitgit:m:<id>:*`; CSS classes with a short module prefix.
+    `fitpush:m:<id>:*`; CSS classes with a short module prefix.
 12. **Never break the core:** don't touch elements outside the one you are given,
-    don't replace `window.fitgit`, don't call `prompt()`/`alert()`, handle missing data
+    don't replace `window.fitpush`, don't call `prompt()`/`alert()`, handle missing data
     (no GPS, no HR, no time) gracefully, and keep event handlers fast.
 13. **Privacy:** don't send activity data, locations or anything personal to external
     services. Map tiles via `sdk.map()` are the only exception, and they are already used

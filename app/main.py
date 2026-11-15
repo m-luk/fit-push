@@ -23,12 +23,12 @@ def create_app(
     """Build the app.
 
     ``db_path``: SQLite file (default: ``paths.db_path()``, the per-user data directory).
-    ``modules``: ``"all"`` (default, env ``FITGIT_MODULES``), ``"none"`` for core only, or ``"a,b"``.
-    ``modules_dir``: where modules live (default ``<repo>/modules``, env ``FITGIT_MODULES_DIR``).
+    ``modules``: ``"all"`` (default, env ``FITPUSH_MODULES``), ``"none"`` for core only, or ``"a,b"``.
+    ``modules_dir``: where modules live (default ``<repo>/modules``, env ``FITPUSH_MODULES_DIR``).
     """
     store = Store(db_path or paths.db_path())
     core = Core(store)
-    app = FastAPI(title="fit-git", version="0.2.0")
+    app = FastAPI(title="fit-push", version="0.2.0")
     app.state.store = store
     app.state.core = core
 

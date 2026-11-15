@@ -149,7 +149,7 @@ class ModuleContext:
     log: logging.Logger = field(init=False)
 
     def __post_init__(self) -> None:
-        self.log = logging.getLogger(f"fitgit.module.{self.id}")
+        self.log = logging.getLogger(f"fitpush.module.{self.id}")
 
     def on(self, event: str, handler: Callable) -> None:
         """Call ``handler(**payload)`` after a core event (errors are caught and reported)."""

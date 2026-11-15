@@ -1,18 +1,19 @@
-"""Where fit-git keeps its data, and the safety backups made before every start.
+"""Where fit-push keeps its data, and the safety backups made before every start.
 
 Data directory (first match wins):
-    1. ``--data-dir`` / env ``FITGIT_DATA_DIR``
-    2. Windows: ``%LOCALAPPDATA%\\fit-git``
-       macOS:   ``~/Library/Application Support/fit-git``
-       Linux:   ``$XDG_DATA_HOME/fit-git`` (default ``~/.local/share/fit-git``)
+    1. ``--data-dir`` / env ``FITPUSH_DATA_DIR``
+    2. Windows: ``%LOCALAPPDATA%\\fit-push``
+       macOS:   ``~/Library/Application Support/fit-push``
+       Linux:   ``$XDG_DATA_HOME/fit-push`` (default ``~/.local/share/fit-push``)
 
-The database is ``<data dir>/activities.db`` unless ``--db`` / ``FITGIT_DB`` names a
-file. A database from the old location (``<repo>/data/activities.db``) is copied
-over on first start; the old file is left untouched.
+The database is ``<data dir>/activities.db`` unless ``--db`` / ``FITPUSH_DB`` names a
+file. Data from earlier versions is carried over on first start, never moved or deleted:
+the whole data directory of the old name (``.../fit-git``, with its backups) is copied,
+or else ``<repo>/data/activities.db``. Old ``FITGIT_*`` environment variables still work.
 
 Before the app starts, ``backup()`` copies the database (SQLite online backup, so
 the copy is consistent) to ``<data dir>/backups/`` and keeps the newest
-``FITGIT_BACKUPS`` (default 10) copies. ``restore()`` puts one back, after saving
+``FITPUSH_BACKUPS`` (default 10) copies. ``restore()`` puts one back, after saving
 the current database as a ``pre-restore`` copy first.
 """
 
@@ -27,11 +28,17 @@ from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
 
-log = logging.getLogger("fitgit.paths")
+log = logging.getLogger("fitpush.paths")
 
-APP_NAME = "fit-git"
+APP_NAME = "fit-push"
+OLD_APP_NAMES = ("fit-git",)  # earlier names of the app; their data directories are migrated
 DB_NAME = "activities.db"
 LEGACY_DB = Path(__file__).resolve().parent.parent / "data" / DB_NAME
+
+
+def setting(name: str, default: str | None = None) -> str | None:
+    """Environment setting ``FITPUSH_<name>``, falling back to the old ``FITGIT_<name>``."""
+    return os.environ.get(f"FITPUSH_{name}") or os.environ.get(f"FITGIT_{name}") or default
 
 
 def default_data_dir(
@@ -51,19 +58,39 @@ def default_data_dir(
 
 
 def data_dir() -> Path:
-    return Path(os.environ.get("FITGIT_DATA_DIR") or default_data_dir())
+    return Path(setting("DATA_DIR") or default_data_dir())
 
 
 def db_path() -> Path:
     """Database location; creates the data directory and migrates a legacy database once."""
-    if os.environ.get("FITGIT_DB"):
-        return Path(os.environ["FITGIT_DB"])
-    path = data_dir() / DB_NAME
-    path.parent.mkdir(parents=True, exist_ok=True)
-    if not path.exists() and LEGACY_DB.is_file():
-        _sqlite_copy(LEGACY_DB, path)
-        log.warning("copied the database from %s to %s (the old file is kept)", LEGACY_DB, path)
+    if db := setting("DB"):
+        return Path(db)
+    folder = data_dir()
+    path = folder / DB_NAME
+    if not path.exists():
+        migrate_old_data(folder)
+    folder.mkdir(parents=True, exist_ok=True)
     return path
+
+
+def migrate_old_data(folder: Path) -> Path | None:
+    """Copy data of an earlier app name / location into ``folder``; returns the source or None.
+
+    Order: a sibling data directory with an old app name (copied whole, including
+    backups), then the repository's ``data/activities.db``. Sources are never changed.
+    """
+    for old in OLD_APP_NAMES:
+        old_dir = folder.with_name(old)
+        if (old_dir / DB_NAME).is_file():
+            shutil.copytree(old_dir, folder, dirs_exist_ok=True, ignore=shutil.ignore_patterns("*-wal", "*-shm"))
+            _sqlite_copy(old_dir / DB_NAME, folder / DB_NAME)  # consistent copy of the live database
+            log.warning("copied data from %s to %s (the old directory is kept)", old_dir, folder)
+            return old_dir
+    if LEGACY_DB.is_file():
+        _sqlite_copy(LEGACY_DB, folder / DB_NAME)
+        log.warning("copied the database from %s to %s (the old file is kept)", LEGACY_DB, folder / DB_NAME)
+        return LEGACY_DB
+    return None
 
 
 def backups_dir(db: Path) -> Path:
@@ -84,7 +111,7 @@ def backup(db: Path, keep: int | None = None, label: str = "auto") -> Path | Non
     """Copy ``db`` into the backups folder and prune old automatic copies. None if there is no db yet."""
     if not db.is_file() or db.stat().st_size == 0:
         return None
-    keep = keep if keep is not None else int(os.environ.get("FITGIT_BACKUPS", "10"))
+    keep = keep if keep is not None else int(setting("BACKUPS", "10") or 10)
     target = backups_dir(db) / f"{db.stem}-{datetime.now():%Y%m%d-%H%M%S}-{label}.db"
     _sqlite_copy(db, target)
     autos = sorted(backups_dir(db).glob(f"{db.stem}-*-auto.db"))

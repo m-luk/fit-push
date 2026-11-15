@@ -1,9 +1,9 @@
 ---
 name: ui-development
-description: How to build and change the fit-git frontend (app/static/index.html, app.js, style.css) - architecture of app.js, routing and view state, design tokens and dataviz rules, charts (Chart.js), map (Leaflet), the selection model, dialogs and accessibility. Use before adding or changing any page, card, chart, map feature, control or style in this project.
+description: How to build and change the fit-push frontend (app/static/index.html, app.js, style.css) - architecture of app.js, routing and view state, design tokens and dataviz rules, charts (Chart.js), map (Leaflet), the selection model, dialogs and accessibility. Use before adding or changing any page, card, chart, map feature, control or style in this project.
 ---
 
-# fit-git UI development
+# fit-push UI development
 
 The frontend is one page with no build step: `index.html` (shell, sidebar,
 dialogs), `app.js` (one IIFE, ~1300 lines), `style.css` (tokens and components).
@@ -28,11 +28,11 @@ After the change, verify it in a browser with the **ui-verify** skill.
 | laps view | `renderLaps` (summary table, lap-time chart, lap list) |
 | segments pages | `loadSegments`, `renderSegList`, `setTab`, `leaveActivity`, `renderSegmentsPage`, `renderSegment` |
 | tags (core) | `loadTags`, `renderTagFilter` (sidebar), `renderTagEditor` (chips under the activity title) |
-| module SDK (window.fitgit) | the frozen `sdk` object, `registerPage` / `registerActivityCard`, `pageCleanups` + `runCleanups` (called from `disposeMap`), `loadModules` (CSS + scripts from `/m/<id>/`), `renderNav`, `renderModulePage`, `renderModuleCards`, `selectNamed`, `showModuleError` |
+| module SDK (window.fitpush) | the frozen `sdk` object, `registerPage` / `registerActivityCard`, `pageCleanups` + `runCleanups` (called from `disposeMap`), `loadModules` (CSS + scripts from `/m/<id>/`), `renderNav`, `renderModulePage`, `renderModuleCards`, `selectNamed`, `showModuleError` |
 | modules page (+ docs) | `markdown()` (small, escaping renderer), `renderModulesPage` (`#/modules`, `#/modules/<id>`) |
 | router | `route()` parses the hash and calls a `render*` function |
 
-`window.fitgit` is a **public contract** for modules (docs/SDK.md). Adding to it is
+`window.fitpush` is a **public contract** for modules (docs/SDK.md). Adding to it is
 a core change: document it in docs/SDK.md and keep old calls working. Every new
 extension point must contain module errors (`try/catch` → `showModuleError`) and
 register cleanups so navigation frees maps and charts.
@@ -43,7 +43,7 @@ register cleanups so navigation frees maps and charts.
   `start`, `end` (trimmed view, absolute cleaned indices), `laps=1`, `effort={id}`;
   `#/segments`, `#/segment/{id}`. Anything a user may want to bookmark or link
   to belongs in the hash; parse it in `route()` and pass it via `opts`.
-- `localStorage` (`lsGet/lsSet`, prefix `fitgit:`) only for per-viewer
+- `localStorage` (`lsGet/lsSet`, prefix `fitpush:`) only for per-viewer
   preferences: units, theme, x-axis mode, overlay, palette. Never for data.
 - A `render*` function owns `main.innerHTML` completely: build the markup
   string, assign once, then attach listeners. Call `destroyCharts()` and

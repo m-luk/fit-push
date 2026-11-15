@@ -1,9 +1,10 @@
 [project]
-name = "fit-git"
+name = "fit-push"
 version = "0.2.0"
 description = "Local web app to analyse and visualise sports activity files (FIT, GPX, TCX)"
 requires-python = ">=3.10"
 readme = "README.md"
+license = "MIT"
 
 # ----------------------------------------------------------------------------- pytest
 [tool.pytest.ini_options]

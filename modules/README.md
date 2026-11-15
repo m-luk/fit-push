@@ -15,7 +15,7 @@ pages, activity cards, API endpoints or reactions to events.
 
 ```bash
 python scripts/run.py                         # core + every module with enabled_by_default
-python scripts/run.py --core-only             # core only (also: FITGIT_MODULES=none)
+python scripts/run.py --core-only             # core only (also: FITPUSH_MODULES=none)
 python scripts/run.py --modules activity_map  # core + the listed modules
 ```
 

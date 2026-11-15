@@ -42,7 +42,7 @@ def _rows(cols: dict) -> list[dict]:
 def to_gpx(cols: dict, name: str, sport: str) -> bytes:
     out = [
         '<?xml version="1.0" encoding="UTF-8"?>\n',
-        '<gpx version="1.1" creator="fit-git" xmlns="http://www.topografix.com/GPX/1/1" '
+        '<gpx version="1.1" creator="fit-push" xmlns="http://www.topografix.com/GPX/1/1" '
         'xmlns:gpxtpx="http://www.garmin.com/xmlschemas/TrackPointExtension/v1" '
         'xmlns:gpxpx="http://www.garmin.com/xmlschemas/PowerExtension/v1">\n',
         f"<metadata><name>{escape(name)}</name>",
@@ -119,7 +119,7 @@ def to_tcx(cols: dict, name: str, sport: str, distance: list[float]) -> bytes:
         out.append(s + "</Trackpoint>\n")
     out.append(
         f"</Track></Lap><Notes>{escape(name)}</Notes>"
-        "<Creator><Name>fit-git</Name></Creator></Activity></Activities>\n"
+        "<Creator><Name>fit-push</Name></Creator></Activity></Activities>\n"
         "</TrainingCenterDatabase>\n"
     )
     return "".join(out).encode()

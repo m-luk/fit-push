@@ -4,7 +4,7 @@
     "version": "2.0.0",
     "tasks": [
         {
-            "label": "fit-git: run",
+            "label": "fit-push: run",
             "detail": "Start the app on http://127.0.0.1:8000 (sets up .venv on first run)",
             "type": "process",
             "command": "python3",
@@ -15,7 +15,7 @@
             "group": { "kind": "build", "isDefault": true }
         },
         {
-            "label": "fit-git: run (auto-reload)",
+            "label": "fit-push: run (auto-reload)",
             "detail": "Start the app and restart it when Python files change",
             "type": "process",
             "command": "python3",
@@ -25,7 +25,7 @@
             "presentation": { "reveal": "always", "panel": "dedicated" }
         },
         {
-            "label": "fit-git: tests",
+            "label": "fit-push: tests",
             "detail": "Run the pytest suite (installs dev requirements on first run)",
             "type": "process",
             "command": "python3",
@@ -35,7 +35,7 @@
             "group": { "kind": "test", "isDefault": true }
         },
         {
-            "label": "fit-git: run (core only)",
+            "label": "fit-push: run (core only)",
             "detail": "Start the app without any modules",
             "type": "process",
             "command": "python3",
@@ -45,7 +45,7 @@
             "presentation": { "reveal": "always", "panel": "dedicated" }
         },
         {
-            "label": "fit-git: lint + types",
+            "label": "fit-push: lint + types",
             "detail": "ruff check, ruff format --check, ty check, module rules",
             "type": "process",
             "command": "${workspaceFolder}/.venv/bin/python",

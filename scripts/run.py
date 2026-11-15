@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run fit-git (or its tests) from any OS with any Python 3.10+ on PATH.
+"""Run fit-push (or its tests) from any OS with any Python 3.10+ on PATH.
 
 Creates ``.venv`` on first run, (re)installs requirements when they change,
 then runs the app or pytest with the venv's interpreter.
@@ -24,7 +24,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 VENV = ROOT / ".venv"
-STAMP = VENV / ".fitgit-requirements"
+STAMP = VENV / ".fitpush-requirements"
 
 
 def venv_python() -> Path:
@@ -72,7 +72,7 @@ def main() -> int:
         cmd = [str(py), "-m", "app", "--host", args.host, "--port", str(args.port), *extra]
         if args.reload:
             cmd.append("--reload")
-        print(f"fit-git on http://{args.host}:{args.port}  (Ctrl+C to stop)", flush=True)
+        print(f"fit-push on http://{args.host}:{args.port}  (Ctrl+C to stop)", flush=True)
     try:
         return subprocess.call(cmd, cwd=ROOT)
     except KeyboardInterrupt:

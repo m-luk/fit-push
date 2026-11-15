@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Module tooling: scaffold, check and document fit-git modules.
+"""Module tooling: scaffold, check and document fit-push modules.
 
     python scripts/modules.py new <id> --owner <github-id> --name "Nice name" [--provides page,api]
     python scripts/modules.py check [<id> ...]      # all modules when no id is given
@@ -105,20 +105,20 @@ def _check_backend(path: Path, module_id: str) -> list[str]:
 def _check_frontend(path: Path, module_id: str) -> list[str]:
     src = path.read_text(encoding="utf-8")
     errs = []
-    if "window.fitgit" not in src or not re.search(r"\.register(Page|ActivityCard)\(", src):
-        errs.append("frontend.js must use window.fitgit and register via registerPage / registerActivityCard")
+    if "window.fitpush" not in src or not re.search(r"\.register(Page|ActivityCard)\(", src):
+        errs.append("frontend.js must use window.fitpush and register via registerPage / registerActivityCard")
     if not re.search(rf"module:\s*[\"']{module_id}[\"']", src):
         errs.append(f'frontend.js registrations must declare module: "{module_id}"')
     for pat, why in [
-        (r"\b(prompt|alert)\s*\(", "prompt()/alert() are blocked in embedded browsers; use fitgit.askName/toast"),
+        (r"\b(prompt|alert)\s*\(", "prompt()/alert() are blocked in embedded browsers; use fitpush.askName/toast"),
         (
             r"getElementById\(\s*[\"']main[\"']\)|querySelector\(\s*[\"']#main",
             "do not touch #main; render into the element you are given",
         ),
-        (r"window\.fitgit\s*=", "do not replace window.fitgit"),
+        (r"window\.fitpush\s*=", "do not replace window.fitpush"),
         (
-            r"localStorage\.(get|set)Item\(\s*[\"'](?!fitgit:m:" + module_id + ")",
-            f"localStorage keys must start with 'fitgit:m:{module_id}'",
+            r"localStorage\.(get|set)Item\(\s*[\"'](?!fitpush:m:" + module_id + ")",
+            f"localStorage keys must start with 'fitpush:m:{module_id}'",
         ),
     ]:
         if re.search(pat, src):
@@ -221,7 +221,7 @@ def render_index() -> str:
 def render_manual() -> str:
     parts = [
         GENERATED,
-        "# fit-git module manuals",
+        "# fit-push module manuals",
         "",
         "User manuals of all installed modules, collected from `modules/<id>/MANUAL.md`.",
         "",

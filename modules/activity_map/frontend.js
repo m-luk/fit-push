@@ -1,7 +1,7 @@
-// All activities map (frontend): registers the "Map" page (#/m/activity_map). Uses only window.fitgit.
+// All activities map (frontend): registers the "Map" page (#/m/activity_map). Uses only window.fitpush.
 (() => {
   "use strict";
-  const sdk = window.fitgit;
+  const sdk = window.fitpush;
   const esc = sdk.esc;
   const PRESETS = { all: "All time", d30: "Last 30 days", d90: "Last 90 days", y1: "Last 12 months", ytd: "This year" };
 

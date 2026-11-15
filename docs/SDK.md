@@ -1,4 +1,4 @@
-# fit-git module SDK (version 1)
+# fit-push module SDK (version 1)
 
 Everything a module may use from the core. If you need something that is not here,
 do not reach into `app/` internals: propose an SDK addition as a separate core change
@@ -28,7 +28,7 @@ error shows on the Modules page; the core keeps running.
 | `ctx.core` | `CoreAPI`, see below |
 | `ctx.db` | `ModuleDB`, see below |
 | `ctx.on(event, handler)` | call `handler(**payload)` after a core event |
-| `ctx.log` | `logging.Logger` named `fitgit.module.<id>` |
+| `ctx.log` | `logging.Logger` named `fitpush.module.<id>` |
 
 ### `ctx.core` (CoreAPI)
 
@@ -80,14 +80,14 @@ Clean up your rows in an `activity.deleted` handler.
 ## Frontend: `frontend.js` (+ optional `frontend.css`)
 
 Plain JavaScript (no build step), loaded after the core. Wrap it in an IIFE and use
-only `window.fitgit` plus the page globals `L` (Leaflet 1.9.4) and `Chart`
+only `window.fitpush` plus the page globals `L` (Leaflet 1.9.4) and `Chart`
 (Chart.js 4.4.1).
 
 ```js
-// <Name> (frontend): registers ... Uses only window.fitgit.
+// <Name> (frontend): registers ... Uses only window.fitpush.
 (() => {
   "use strict";
-  const sdk = window.fitgit;
+  const sdk = window.fitpush;
   sdk.registerPage({ module: "my_mod", label: "My page", icon: "🧩", async render(el, ctx) { ... } });
 })();
 ```

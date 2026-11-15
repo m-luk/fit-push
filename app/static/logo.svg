@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-labelledby="t">
+  <title id="t">fit-push</title>
+  <!-- A git-style rounded diamond; the runner is drawn as a branch graph: limbs are
+       branch lines, the joints are commit nodes. -->
+  <rect x="17" y="17" width="66" height="66" rx="11" transform="rotate(45 50 50)" fill="#ee5a2c"/>
+  <g fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M56 35 L47 55"/>
+    <path d="M54 39 L63 46 L71 40"/>
+    <path d="M54 39 L44 43 L39 51"/>
+    <path d="M47 55 L58 62 L55 76"/>
+    <path d="M47 55 L39 66 L28 67"/>
+  </g>
+  <g fill="#fff">
+    <circle cx="61" cy="25" r="6.5"/>
+    <circle cx="47" cy="55" r="6"/>
+    <circle cx="58" cy="62" r="4.5"/>
+    <circle cx="39" cy="51" r="4.5"/>
+    <circle cx="28" cy="67" r="4.5"/>
+  </g>
+</svg>

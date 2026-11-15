@@ -13,7 +13,7 @@ from . import paths
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="fit-git activity analytics server")
+    ap = argparse.ArgumentParser(description="fit-push activity analytics server")
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8000)
     ap.add_argument("--reload", action="store_true", help="restart when Python files change")
@@ -29,13 +29,13 @@ def main() -> int:
 
     # Settings travel as environment variables so the uvicorn factory (and --reload workers) see them.
     if args.data_dir:
-        os.environ["FITGIT_DATA_DIR"] = str(Path(args.data_dir).expanduser().resolve())
+        os.environ["FITPUSH_DATA_DIR"] = str(Path(args.data_dir).expanduser().resolve())
     if args.db:
-        os.environ["FITGIT_DB"] = str(Path(args.db).expanduser().resolve())
+        os.environ["FITPUSH_DB"] = str(Path(args.db).expanduser().resolve())
     if args.core_only:
-        os.environ["FITGIT_MODULES"] = "none"
+        os.environ["FITPUSH_MODULES"] = "none"
     elif args.modules:
-        os.environ["FITGIT_MODULES"] = args.modules
+        os.environ["FITPUSH_MODULES"] = args.modules
 
     db = paths.db_path()
     if args.list_backups:

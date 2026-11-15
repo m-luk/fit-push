@@ -1,9 +1,9 @@
 ---
 name: ui-verify
-description: Verify fit-git frontend changes in a real headless browser (Playwright driving the installed Edge or Chrome) - one-time setup, the bundled smoke test covering dashboard, activity, map overlays, laps, segments, dark mode and 390 px width, and how to write a targeted check for a new feature. Use after any change to app/static/ and before reporting UI work as done.
+description: Verify fit-push frontend changes in a real headless browser (Playwright driving the installed Edge or Chrome) - one-time setup, the bundled smoke test covering dashboard, activity, map overlays, laps, segments, dark mode and 390 px width, and how to write a targeted check for a new feature. Use after any change to app/static/ and before reporting UI work as done.
 ---
 
-# Verifying fit-git UI changes
+# Verifying fit-push UI changes
 
 `node --check` only proves the JS parses. UI work is done when it has run in a
 browser without console errors and the screenshots have been looked at.
@@ -15,18 +15,18 @@ Playwright lives in its own venv outside the project, so it never ends up in
 so no browser download is needed.
 
 ```powershell
-python -m venv $env:TEMP\fitgit-pw
-& $env:TEMP\fitgit-pw\Scripts\python.exe -m pip install -q playwright
+python -m venv $env:TEMP\fitpush-pw
+& $env:TEMP\fitpush-pw\Scripts\python.exe -m pip install -q playwright
 ```
 
 (Use your scratchpad directory instead of `$env:TEMP` if the session has one.
-On Linux/macOS: `python3 -m venv /tmp/fitgit-pw` and `--channel chrome`, or
+On Linux/macOS: `python3 -m venv /tmp/fitpush-pw` and `--channel chrome`, or
 `playwright install chromium` and drop the channel.)
 
 ## Smoke test
 
 ```powershell
-& $env:TEMP\fitgit-pw\Scripts\python.exe .claude\skills\ui-verify\scripts\ui_smoke.py --out $env:TEMP\fitgit-shots
+& $env:TEMP\fitpush-pw\Scripts\python.exe .claude\skills\ui-verify\scripts\ui_smoke.py --out $env:TEMP\fitpush-shots
 ```
 
 It starts the app on port 8790 with a throw-away database and uploads synthetic
@@ -66,7 +66,7 @@ Playwright script for it. Keep these habits:
 - Before mouse interactions on charts or the map, call
   `scroll_into_view_if_needed()`. Off-screen canvases silently ignore drags.
 - To click a map position, open the page with `?debug` before the hash
-  (`/?debug#/activity/3`). That exposes the Leaflet map as `window.__fitgitMap`,
+  (`/?debug#/activity/3`). That exposes the Leaflet map as `window.__fitpushMap`,
   so you can convert lat/lon with `latLngToContainerPoint`.
 - Prefer `page.wait_for_selector` / `wait_for_url` over sleeps. Use short
   `wait_for_timeout(100–300)` only after canvas redraws.

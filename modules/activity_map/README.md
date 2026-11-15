@@ -17,7 +17,7 @@ at most 400 points), cached in memory per activity and dropped on the
 date span that exist, for the filter controls.
 
 The frontend registers the **Map** page (`#/m/activity_map`). It draws the lines
-with `fitgit.map()`, colours them by sport (categorical `--cat-*` tokens, legend
+with `fitpush.map()`, colours them by sport (categorical `--cat-*` tokens, legend
 toggles, tooltips) or by date (sequential blue `--ov-*` ramp), and keeps the
 filters in the URL so a view can be bookmarked.
 

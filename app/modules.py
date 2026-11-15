@@ -1,6 +1,6 @@
 """Module loader: discovers ``modules/<id>/module.json``, validates and loads selected modules.
 
-Selection (``create_app(modules=...)``, ``python -m app --modules``, env ``FITGIT_MODULES``):
+Selection (``create_app(modules=...)``, ``python -m app --modules``, env ``FITPUSH_MODULES``):
 ``"all"`` (default: every module with ``enabled_by_default``), ``"none"`` (core only),
 or a comma-separated list of ids.
 
@@ -14,7 +14,6 @@ from __future__ import annotations
 import importlib.util
 import json
 import logging
-import os
 import re
 import sys
 from dataclasses import dataclass, field
@@ -24,9 +23,10 @@ from fastapi import APIRouter, FastAPI, HTTPException
 from fastapi.responses import FileResponse, PlainTextResponse
 
 from .core import Core
+from .paths import setting
 from .sdk import SDK_VERSION, CoreAPI, ModuleContext, ModuleDB
 
-log = logging.getLogger("fitgit.modules")
+log = logging.getLogger("fitpush.modules")
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_DIR = ROOT / "modules"
@@ -108,7 +108,7 @@ def validate_manifest(manifest: dict, folder: Path) -> list[str]:
 
 
 def discover(directory: Path | None = None) -> list[ModuleInfo]:
-    directory = Path(directory or os.environ.get("FITGIT_MODULES_DIR") or DEFAULT_DIR)
+    directory = Path(directory or setting("MODULES_DIR") or DEFAULT_DIR)
     infos = []
     for manifest_path in sorted(directory.glob("*/module.json")):
         folder = manifest_path.parent
@@ -135,7 +135,7 @@ def _selected(infos: list[ModuleInfo], spec: str) -> set[str]:
 
 def load_modules(app: FastAPI, core: Core, spec: str | None = None, directory: Path | None = None) -> list[ModuleInfo]:
     """Discover, select and register modules on ``app``; returns every discovered module with its status."""
-    spec = spec if spec is not None else os.environ.get("FITGIT_MODULES", "all")
+    spec = spec if spec is not None else (setting("MODULES") or "all")
     infos = discover(directory)
     by_id = {i.id: i for i in infos}
     wanted = _selected(infos, spec)
@@ -191,7 +191,7 @@ def _register(app: FastAPI, core: Core, info: ModuleInfo) -> bool:
             _on=lambda ev, fn, _id=info.id: core.events.on(ev, fn, owner=_id),
         )
         try:
-            spec = importlib.util.spec_from_file_location(f"fitgit_modules.{info.id}", backend)
+            spec = importlib.util.spec_from_file_location(f"fitpush_modules.{info.id}", backend)
             if spec is None or spec.loader is None:
                 raise ImportError(f"cannot load {backend}")
             module = importlib.util.module_from_spec(spec)

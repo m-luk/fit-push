@@ -305,4 +305,4 @@ td.name-cell { text-align: left; max-width: 260px; overflow: hidden; text-overfl
 .md-table th, .md-table td { text-align: left; }
 .docs-grid { align-items: start; }
 
-a.btn { text-decoration: none; display: inline-flex; align-items: center; }
+a.btn { text-decoration: none; display: inline-flex; align-items: center; color: var(--text-primary); }

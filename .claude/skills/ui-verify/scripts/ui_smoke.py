@@ -1,4 +1,4 @@
-"""Browser smoke test for the fit-git UI (Playwright + installed Edge/Chrome).
+"""Browser smoke test for the fit-push UI (Playwright + installed Edge/Chrome).
 
 Starts the app on a scratch database filled with synthetic activities, walks the
 main flows, saves screenshots and fails on console errors or broken steps.
@@ -48,12 +48,12 @@ def main() -> int:
     args = ap.parse_args()
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
-    work = Path(tempfile.mkdtemp(prefix="fitgit-ui-"))
+    work = Path(tempfile.mkdtemp(prefix="fitpush-ui-"))
     db = work / "ui.db"
     if args.db_copy:
         shutil.copy(args.db_copy, db)
 
-    env = {**os.environ, "FITGIT_DB": str(db)}
+    env = {**os.environ, "FITPUSH_DB": str(db)}
     server = subprocess.Popen(
         [
             str(VENV_PY),

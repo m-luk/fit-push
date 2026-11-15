@@ -18,7 +18,7 @@ import logging
 from collections import defaultdict
 from collections.abc import Callable
 
-log = logging.getLogger("fitgit.events")
+log = logging.getLogger("fitpush.events")
 
 EVENTS = (
     "activity.imported",

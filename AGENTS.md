@@ -1,4 +1,4 @@
-# AGENTS.md: working on fit-git
+# AGENTS.md: working on fit-push
 
 Guidelines for AI coding agents (and humans) changing this repository. Read this
 first: it is the single source of project conventions. Tool-specific files
@@ -21,7 +21,7 @@ lap detection, segments, tags. Optional features come as **modules**.
 |---|---|
 | Data model, import/parse/analysis pipeline, something every page relies on (activities, sports, tags, laps, segments, settings, storage) | **core** (`app/`) |
 | An optional capability with its own page, activity card or API; useful to some users | **module** (`modules/<id>/`), see the **module-development** skill and `modules/RULES.md` |
-| A module needs something the SDK lacks | a separate **core** change extending `app/sdk.py` / `window.fitgit`, documented in `docs/SDK.md` |
+| A module needs something the SDK lacks | a separate **core** change extending `app/sdk.py` / `window.fitpush`, documented in `docs/SDK.md` |
 
 Modules must stay small (one capability), self-contained, owned (GitHub id) and
 documented (`README.md` intent + `MANUAL.md`). Working on a module never requires
@@ -59,16 +59,21 @@ Run them locally before committing; a red gate is not "done".
 
 ## Data location and backups
 
-`app/paths.py`. The database lives in the per-user data directory:
-- Windows: `%LOCALAPPDATA%\fit-git`
-- macOS: `~/Library/Application Support/fit-git`
-- Linux: `$XDG_DATA_HOME/fit-git` (default `~/.local/share/fit-git`)
+The app was renamed from **fit-git** to **fit-push**. `app/paths.py` copies data from the
+old name's data directory (and the repo's `data/activities.db`) on first start and still
+reads `FITGIT_*` env vars and `fitgit:` localStorage keys. Keep those fallbacks.
 
-Override with `--data-dir` / `FITGIT_DATA_DIR` or `--db` / `FITGIT_DB`. The old
+
+`app/paths.py`. The database lives in the per-user data directory:
+- Windows: `%LOCALAPPDATA%\fit-push`
+- macOS: `~/Library/Application Support/fit-push`
+- Linux: `$XDG_DATA_HOME/fit-push` (default `~/.local/share/fit-push`)
+
+Override with `--data-dir` / `FITPUSH_DATA_DIR` or `--db` / `FITPUSH_DB`. The old
 `<repo>/data/activities.db` is copied over once.
 
 Every `python -m app` start first copies the database to `<data dir>/backups/`
-(SQLite online backup; newest `FITGIT_BACKUPS`=10 automatic copies kept).
+(SQLite online backup; newest `FITPUSH_BACKUPS`=10 automatic copies kept).
 `--list-backups` and `--restore latest|<file>` put one back, saving the current
 database as a `pre-restore` copy first. Never weaken this safety net.
 
@@ -85,10 +90,11 @@ app/
   modules.py      module discovery, manifest validation, isolated loading, /api/modules, /m/<id>/*
   paths.py        data directory, legacy migration, backups/restore
   parsers.py, analytics.py, laps.py, segments.py, writers.py, sports.py, storage.py
-  static/         index.html, app.js (core UI + window.fitgit SDK), style.css
+  static/         index.html, app.js (core UI + window.fitpush SDK), style.css
 modules/
   RULES.md, README.md, INDEX.md (generated), _template/, <id>/ (one folder per module)
 docs/
+  USER_GUIDE.md, DATA.md, API.md, DEVELOPMENT.md   user and developer documentation
   SDK.md          the module contract;  MODULES_MANUAL.md (generated)
 tests/
   core/           core tests by area;  helpers.py, samples.py (synthetic data)
@@ -139,7 +145,7 @@ Use the **ui-development** skill for any change under `app/static/`, and the
 - View state in the URL hash; per-viewer preferences in `localStorage` (try/catch).
 - Async renders guard every `await` with the render token; dispose maps (and module
   cleanups) before replacing the page; no animated programmatic map moves.
-- `window.fitgit` is a public contract (docs/SDK.md): extend, don't break.
+- `window.fitpush` is a public contract (docs/SDK.md): extend, don't break.
 
 ## Tests
 
@@ -161,7 +167,9 @@ Use the **ui-development** skill for any change under `app/static/`, and the
 - Small, focused commits; imperative subject (≤ 72 chars), body says *why*.
 - No attribution / co-author lines.
 - Stage files explicitly; check `git status` so personal files never sneak in.
-- Update `README.md` when behaviour or the API changes; regenerate module docs.
+- Docs: `README.md` is the short, user-facing front page; details go in `docs/`
+  (`USER_GUIDE.md` features, `DATA.md` storage/backups, `API.md`, `DEVELOPMENT.md`). Update
+  the matching doc when behaviour or the API changes; regenerate module docs.
 
 ## Environment notes
 

@@ -11,11 +11,11 @@ from app import paths
 @pytest.mark.parametrize(
     "platform,env,expected",
     [
-        ("win32", {"LOCALAPPDATA": r"C:\Users\x\AppData\Local"}, Path(r"C:\Users\x\AppData\Local") / "fit-git"),
-        ("win32", {}, Path("/home/x") / "AppData" / "Local" / "fit-git"),
-        ("darwin", {}, Path("/home/x") / "Library" / "Application Support" / "fit-git"),
-        ("linux", {}, Path("/home/x") / ".local" / "share" / "fit-git"),
-        ("linux", {"XDG_DATA_HOME": "/data/xdg"}, Path("/data/xdg") / "fit-git"),
+        ("win32", {"LOCALAPPDATA": r"C:\Users\x\AppData\Local"}, Path(r"C:\Users\x\AppData\Local") / "fit-push"),
+        ("win32", {}, Path("/home/x") / "AppData" / "Local" / "fit-push"),
+        ("darwin", {}, Path("/home/x") / "Library" / "Application Support" / "fit-push"),
+        ("linux", {}, Path("/home/x") / ".local" / "share" / "fit-push"),
+        ("linux", {"XDG_DATA_HOME": "/data/xdg"}, Path("/data/xdg") / "fit-push"),
     ],
 )
 def test_default_data_dir(platform, env, expected):
@@ -42,11 +42,11 @@ def test_db_path_env_and_legacy_migration(tmp_path, monkeypatch):
     legacy.parent.mkdir(parents=True)
     _db(legacy, 3)
     monkeypatch.setattr(paths, "LEGACY_DB", legacy)
-    monkeypatch.delenv("FITGIT_DB", raising=False)
-    monkeypatch.setenv("FITGIT_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.delenv("FITPUSH_DB", raising=False)
+    monkeypatch.setenv("FITPUSH_DATA_DIR", str(tmp_path / "data"))
     db = paths.db_path()
     assert db == tmp_path / "data" / "activities.db" and _count(db) == 3 and legacy.is_file()
-    monkeypatch.setenv("FITGIT_DB", str(tmp_path / "other.db"))
+    monkeypatch.setenv("FITPUSH_DB", str(tmp_path / "other.db"))
     assert paths.db_path() == tmp_path / "other.db"
 
 
@@ -75,3 +75,30 @@ def test_backup_rotation_and_restore(tmp_path, monkeypatch):
     assert len(pre) == 1 and _count(pre[0]) == 6  # the broken state was kept too
     with pytest.raises(FileNotFoundError):
         paths.restore(db, "nope.db")
+
+
+def test_old_app_name_directory_is_carried_over(tmp_path, monkeypatch):
+    """Rename fit-git -> fit-push: the whole old data directory (db + backups) is copied, never moved."""
+    old = tmp_path / "fit-git"
+    (old / "backups").mkdir(parents=True)
+    _db(old / "activities.db", 7)
+    _db(old / "backups" / "activities-20260101-000000-auto.db", 2)
+    monkeypatch.setattr(paths, "LEGACY_DB", tmp_path / "nope" / "activities.db")
+    for var in ("FITPUSH_DB", "FITGIT_DB", "FITGIT_DATA_DIR"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("FITPUSH_DATA_DIR", str(tmp_path / "fit-push"))
+    db = paths.db_path()
+    assert db == tmp_path / "fit-push" / "activities.db" and _count(db) == 7
+    assert [b.name for b in paths.list_backups(db)] == ["activities-20260101-000000-auto.db"]
+    assert _count(old / "activities.db") == 7  # the source is untouched
+    _db(db, 1)
+    assert _count(paths.db_path()) == 8  # second start: the new data wins, nothing copied again
+
+
+def test_old_environment_variables_still_work(tmp_path, monkeypatch):
+    for var in ("FITPUSH_DB", "FITPUSH_DATA_DIR", "FITPUSH_BACKUPS"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("FITGIT_DB", str(tmp_path / "old.db"))
+    assert paths.db_path() == tmp_path / "old.db"
+    monkeypatch.setenv("FITPUSH_DB", str(tmp_path / "new.db"))
+    assert paths.db_path() == tmp_path / "new.db"  # the new name wins

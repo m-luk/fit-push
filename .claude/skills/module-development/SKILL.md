@@ -1,9 +1,9 @@
 ---
 name: module-development
-description: Create or change a fit-git module (an optional feature under modules/<id>/ that plugs into the core through the SDK) - scope it, scaffold it, write the intent README first, implement backend/frontend against docs/SDK.md only, test it, write the user manual, regenerate the registry and verify. Use whenever a feature request can live outside the core, or when editing anything under modules/.
+description: Create or change a fit-push module (an optional feature under modules/<id>/ that plugs into the core through the SDK) - scope it, scaffold it, write the intent README first, implement backend/frontend against docs/SDK.md only, test it, write the user manual, regenerate the registry and verify. Use whenever a feature request can live outside the core, or when editing anything under modules/.
 ---
 
-# Building a fit-git module
+# Building a fit-push module
 
 A module is the smallest self-contained feature that makes sense. It lives in
 `modules/<id>/` and talks to the core **only** through the SDK. That is what lets
@@ -43,7 +43,7 @@ Split when the description needs "and also": two small modules beat one big one.
    `ctx.core` to read activities and points, `ctx.db.table()` for your own tables, and
    `ctx.on("activity.deleted", ...)` to clean up. Keep handlers fast; cache derived
    data in memory or in `m_<id>_*` tables, keyed by activity id.
-4. **Frontend** (`frontend.js`, optional): an IIFE using `window.fitgit`:
+4. **Frontend** (`frontend.js`, optional): an IIFE using `window.fitpush`:
    - `registerPage({module: "<id>", label, icon, render(el, ctx)})` for a new tab;
    - `registerActivityCard({module: "<id>", title, render(el, ctx)})` for a card on
      activity pages.
@@ -80,7 +80,7 @@ the owner, note the change for them (PR description) rather than rewriting the m
 
 Don't work around it (no `app.*` imports, no DOM access outside your element, no
 private core endpoints). Instead make a **separate core change**:
-- add the method to `app/sdk.py` (`CoreAPI` or `ModuleContext`) or the `fitgit`
+- add the method to `app/sdk.py` (`CoreAPI` or `ModuleContext`) or the `fitpush`
   object in `app/static/app.js`;
 - document it in `docs/SDK.md`;
 - test it in `tests/`;

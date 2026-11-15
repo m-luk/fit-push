@@ -1,4 +1,4 @@
-/* fit-git frontend: plain JS + Chart.js + Leaflet. */
+/* fit-push frontend: plain JS + Chart.js + Leaflet. */
 (() => {
   "use strict";
 
@@ -29,8 +29,9 @@
   const $ = (sel, root = document) => root.querySelector(sel);
   const main = $("#main");
 
-  function lsGet(k) { try { return localStorage.getItem("fitgit:" + k); } catch { return null; } }
-  function lsSet(k, v) { try { localStorage.setItem("fitgit:" + k, v); } catch { /* ignore */ } }
+  // Preferences saved under the app's old name ("fitgit:") are still read; new writes use "fitpush:".
+  function lsGet(k) { try { return localStorage.getItem("fitpush:" + k) ?? localStorage.getItem("fitgit:" + k); } catch { return null; } }
+  function lsSet(k, v) { try { localStorage.setItem("fitpush:" + k, v); } catch { /* ignore */ } }
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 
@@ -731,7 +732,7 @@
     });
     $("#map-size").addEventListener("click", () => setMapExpanded(!$("#map-card").classList.contains("expanded")));
     $("#map-pick").addEventListener("click", () => startPick(a));
-    if (new URLSearchParams(location.search).has("debug")) window.__fitgitMap = map; // for UI tests
+    if (new URLSearchParams(location.search).has("debug")) window.__fitpushMap = map; // for UI tests
     drawOverlay(a);
   }
 
@@ -1409,7 +1410,7 @@
     draw(false);
   }
 
-  // ------------------------------------------------------------------ module SDK (window.fitgit)
+  // ------------------------------------------------------------------ module SDK (window.fitpush)
   // The only API frontend modules may use; documented in docs/SDK.md. Keep it stable.
   const modulePages = new Map(); // page id -> {module, id, label, icon, render}
   const moduleCards = [];        // {module, title, order, render}
@@ -1456,7 +1457,7 @@
     chart(canvas, config) { const c = new Chart(canvas, config); pageCleanups.push(() => c.destroy()); return c; },
     chartStyle: Object.freeze({ scales: baseScales, tooltip: tooltipStyle }),
   });
-  window.fitgit = sdk;
+  window.fitpush = sdk;
 
   async function loadModules() {
     try { state.modules = await api("/api/modules"); } catch { state.modules = []; }
