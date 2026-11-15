@@ -54,6 +54,19 @@ Saving new settings recalculates every stored activity.
 
 ## Running
 
+The quickest way is the run script. It creates `.venv` and installs the
+requirements on first run (and again whenever `requirements.txt` changes):
+
+```powershell
+./scripts/run.ps1                     # Windows; -Port 9000 -Reload -BindHost 0.0.0.0
+./scripts/run.sh                      # Linux/macOS; PORT=9000 RELOAD=1 HOST=0.0.0.0
+```
+
+In VS Code, **Terminal → Run Build Task** (Ctrl+Shift+B) runs `fit-git: run`;
+there are also `fit-git: run (auto-reload)` and `fit-git: tests` tasks.
+
+Manual setup:
+
 ```bash
 python -m venv .venv
 .venv\Scripts\activate          # Windows  (source .venv/bin/activate on Linux/macOS)

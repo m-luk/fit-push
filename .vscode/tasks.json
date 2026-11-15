@@ -1,0 +1,41 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "fit-git: run",
+            "detail": "Start the app on http://127.0.0.1:8000 (sets up .venv on first run)",
+            "type": "shell",
+            "command": "./scripts/run.sh",
+            "windows": {
+                "command": "pwsh",
+                "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "${workspaceFolder}/scripts/run.ps1"]
+            },
+            "isBackground": true,
+            "problemMatcher": [],
+            "presentation": { "reveal": "always", "panel": "dedicated" },
+            "group": { "kind": "build", "isDefault": true }
+        },
+        {
+            "label": "fit-git: run (auto-reload)",
+            "detail": "Start the app and restart it when Python files change",
+            "type": "shell",
+            "command": "RELOAD=1 ./scripts/run.sh",
+            "windows": {
+                "command": "pwsh",
+                "args": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "${workspaceFolder}/scripts/run.ps1", "-Reload"]
+            },
+            "isBackground": true,
+            "problemMatcher": [],
+            "presentation": { "reveal": "always", "panel": "dedicated" }
+        },
+        {
+            "label": "fit-git: tests",
+            "detail": "Run the pytest suite",
+            "type": "shell",
+            "command": ".venv/bin/python -m pytest -q",
+            "windows": { "command": "${workspaceFolder}/.venv/Scripts/python.exe -m pytest -q" },
+            "problemMatcher": [],
+            "group": { "kind": "test", "isDefault": true }
+        }
+    ]
+}
