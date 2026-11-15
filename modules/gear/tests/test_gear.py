@@ -119,3 +119,22 @@ def test_module_is_isolated(make_client):
     status = {m["id"]: m["status"] for m in client.get("/api/modules").json()}
     assert status["gear"] == "loaded"
     assert client.get("/m/gear/frontend.js").status_code == 200
+
+
+def test_services_for_importers(make_client):
+    client = make_client(modules="gear")
+    svc = client.app.state.module_services["gear"]
+    bike = svc["ensure"]("VSF", "bike", "VSF TX-Randonee")
+    assert svc["ensure"]("vsf", "other") == bike  # found by name, not duplicated
+    shoes = svc["ensure"]("Fugi", "shoes")
+    assert svc["add_defaults"](bike, ["cycling", "no_such_sport"]) == ["sport:cycling"]
+    other_bike = svc["ensure"]("Gejos", "bike")
+    assert svc["add_defaults"](other_bike, ["cycling", "gravel_cycling"]) == ["sport:gravel_cycling"]
+
+    aid = upload(client, "ride.gpx", to_gpx(synthetic_track(), sport="cycling"))
+    assert _ids(client, aid) == [bike]  # default applied on import
+    svc["assign"](aid, shoes)
+    assert sorted(_ids(client, aid)) == sorted([bike, shoes])  # other kinds are kept
+    svc["assign"](aid, other_bike)
+    assert sorted(_ids(client, aid)) == sorted([other_bike, shoes])  # same kind replaced
+    assert client.get(f"{API}/activity/{aid}").json()["manual"] is True

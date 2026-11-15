@@ -139,6 +139,42 @@ def register(ctx: ModuleContext) -> None:
         ctx.db.execute(f"DELETE FROM {use_t} WHERE activity_id = ?", (activity_id,))
         ctx.db.execute(f"DELETE FROM {manual_t} WHERE activity_id = ?", (activity_id,))
 
+    # ---- services for other modules (importers) --------------------------------------
+    def svc_ensure(name: str, kind: str = "other", notes: str = "") -> int:
+        """Id of the item called ``name`` (case-insensitive, any kind); created when missing."""
+        name = name.strip()
+        rows = ctx.db.query(f"SELECT id FROM {items_t} WHERE lower(name) = lower(?) ORDER BY id", (name,))
+        if rows:
+            return rows[0]["id"]
+        return add_gear(GearIn(name=name, kind=check_kind(kind), notes=notes[:500]))["id"]
+
+    def svc_assign(activity_id: int, gear_id: int) -> None:
+        """Use ``gear_id`` on an activity, replacing its gear of the same kind (a manual choice)."""
+        ctx.core.activity(activity_id)
+        kind = item(gear_id)["kind"]
+        keep = [g["id"] for g in activity_gear(activity_id)["gear"] if g["kind"] != kind and g["id"] != gear_id]
+        set_use(activity_id, [*keep, gear_id])
+        ctx.db.execute(f"INSERT OR IGNORE INTO {manual_t} (activity_id) VALUES (?)", (activity_id,))
+
+    def svc_add_defaults(gear_id: int, sports: list[str]) -> list[str]:
+        """Make the item the default for these sport keys where its kind has no default yet."""
+        g, fams = item(gear_id), families()
+        added = []
+        for sport in dict.fromkeys(sports):
+            target = f"sport:{sport}"
+            if sport in fams and not ctx.db.query(
+                f"SELECT 1 FROM {defaults_t} WHERE target = ? AND kind = ?", (target, g["kind"])
+            ):
+                ctx.db.execute(
+                    f"INSERT INTO {defaults_t} (target, kind, gear_id) VALUES (?, ?, ?)", (target, g["kind"], gear_id)
+                )
+                added.append(target)
+        return added
+
+    ctx.provide("ensure", svc_ensure)
+    ctx.provide("assign", svc_assign)
+    ctx.provide("add_defaults", svc_add_defaults)
+
     ctx.on("activity.imported", on_imported)
     ctx.on("activity.updated", on_updated)
     ctx.on("activity.deleted", on_deleted)

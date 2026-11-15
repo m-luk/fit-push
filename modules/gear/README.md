@@ -34,6 +34,15 @@ Events: `activity.imported` assigns defaults; `activity.updated` with a sport ch
 re-assigns defaults unless the gear was chosen manually; `activity.deleted` removes the
 activity's rows. Changing defaults never rewrites past activities.
 
+Services for other modules (`ctx.service("gear", name)`, used by importers):
+
+- `ensure(name, kind="other", notes="") -> id`: the item with that name (case-insensitive),
+  created when missing.
+- `assign(activity_id, gear_id)`: use the item on the activity, replacing its gear of the
+  same kind; counts as a manual choice.
+- `add_defaults(gear_id, sports) -> [targets]`: make the item the default for these sport
+  keys where its kind has no default yet (existing defaults are never taken over).
+
 Frontend: the **Gear** page (`#/m/gear`) lists items with totals and a limit bar, with
 forms to add/edit them and pick their defaults; the **Gear** activity card shows and
 changes the gear of one activity (hidden while no gear exists).

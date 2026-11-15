@@ -45,7 +45,7 @@ long ago). Clicking a route opens that activity.
 
 ## Gear
 
-*Module `gear` v0.1.0 · owner @m-luk*
+*Module `gear` v0.2.0 · owner @m-luk*
 
 
 ### What it does
