@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS activities (
 );
 CREATE INDEX IF NOT EXISTS ix_activities_start ON activities(start_time);
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS segments (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
@@ -202,6 +203,19 @@ class Store:
                     (k, json.dumps(v)),
                 )
         return self.get_settings()
+
+    # ---------------------------------------------------------------- meta (internal bookkeeping)
+    def get_meta(self, key: str):
+        with self._tx() as c:
+            row = c.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
+        return json.loads(row["value"]) if row else None
+
+    def set_meta(self, key: str, value) -> None:
+        with self._tx() as c:
+            c.execute(
+                "INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (key, json.dumps(value)),
+            )
 
     # ---------------------------------------------------------------- segments
     @staticmethod

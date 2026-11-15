@@ -31,8 +31,8 @@ name has no usable extension.
 
 Per activity:
 
-- distance (from the device when present, otherwise GPS haversine), elapsed and moving time (auto-pause detection, with thresholds per sport)
-- average and max speed / pace, elevation gain and loss (smoothed, with hysteresis), elevation range
+- distance (from the device when present, otherwise GPS haversine), elapsed and moving time (auto-pause detection, with thresholds per sport); during a GPS gap (tunnel, underpass) the distance is spread over the gap instead of arriving in one jump when the fix returns
+- average and max speed / pace (speed from the device's own speed reading when the file has one, otherwise from distance over at least 5 s; short spikes are filtered out), elevation gain and loss (smoothed, with hysteresis), elevation range
 - heart rate: average and max, time in 5 zones (% of max HR), Banister TRIMP
 - power: average, max, Normalized Power, Intensity Factor, TSS, work (kJ), power curve (5 s – 60 min)
 - cadence and temperature

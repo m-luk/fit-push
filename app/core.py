@@ -14,7 +14,7 @@ import re
 from datetime import datetime, timezone
 
 from . import sports, tutorial
-from .analytics import _prepare, activity_to_columns, analyse, point_count, window_columns
+from .analytics import ANALYSIS_VERSION, _prepare, activity_to_columns, analyse, point_count, window_columns
 from .events import EventBus
 from .laps import detect_laps, lap_report
 from .parsers import ParseError, normalise_sport, parse_file
@@ -73,6 +73,24 @@ class Core:
                 self.store.update(aid, summary=stored_summary(analyse(row["points"], row["sport"], settings)))
             self.events.emit("settings.changed", settings=settings)
         return settings
+
+    def refresh_stale_summaries(self) -> int:
+        """Recompute stored summaries made by an older analysis (once per ANALYSIS_VERSION).
+
+        Activities are immutable, but how they are analysed improves; a summary stored by an
+        older version would disagree with the activity page. Returns how many were refreshed.
+        """
+        if self.store.get_meta("analysis_version") == ANALYSIS_VERSION:
+            return 0
+        settings, ids = self.settings(), self.store.all_ids()
+        for aid in ids:
+            row = self.row(aid)
+            try:
+                self.store.update(aid, summary=stored_summary(analyse(row["points"], row["sport"], settings)))
+            except ValueError:
+                continue  # keep the old summary of an activity the analysis cannot read
+        self.store.set_meta("analysis_version", ANALYSIS_VERSION)
+        return len(ids)
 
     # ------------------------------------------------------------------ activities
     def row(self, activity_id: int, with_points: bool = True) -> dict:

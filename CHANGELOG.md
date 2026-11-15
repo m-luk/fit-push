@@ -8,6 +8,15 @@ How to update it: see "Changelog" in `AGENTS.md`.
 
 ## [Unreleased]
 
+### Fixed
+
+- Unrealistic max speeds (e.g. 80–200 km/h on a city bike ride), mostly with watches using
+  smart recording: speed now comes from the device's speed reading when the file has
+  one, otherwise from distance over at least 5 seconds, with short spikes filtered out.
+  Distance covered while GPS was lost is spread over the gap instead of arriving in one
+  jump, which also corrects moving time and best efforts. Existing activities are
+  recomputed once on the next start.
+
 ## [0.3.0] - 2026-11-15
 
 ### Added

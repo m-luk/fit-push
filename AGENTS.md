@@ -146,7 +146,9 @@ packaging/        launcher.py (desktop entry point), installer.iss (Inno Setup),
    by time, drop duplicate timestamps). Every index exchanged with the frontend, the
    DB or modules (trim windows, `series.idx`, laps, segment efforts, `ctx.core.points`)
    refers to the **cleaned** sequence of the **whole** activity.
-2. **Activities are immutable; derived data is refreshed in `Core`.** Summaries on
+2. **Activities are immutable; derived data is refreshed in `Core`.** When a change to
+   `analytics.py` alters the stored summary of an existing activity, bump
+   `ANALYSIS_VERSION`: the next start recomputes stored summaries once. Summaries on
    settings/sport change, lap cache by `(id, sha256)`, segment efforts on upload,
    clip, sport change, segment creation and rescan. New derived data hooks into the
    same `Core` methods, and the core emits an event for each change.

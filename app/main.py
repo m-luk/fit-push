@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -15,6 +16,7 @@ from .routes import activities, segments, system, tutorial
 from .storage import Store
 
 STATIC_DIR = Path(__file__).parent / "static"
+log = logging.getLogger("fitpush")
 
 
 def create_app(
@@ -28,6 +30,8 @@ def create_app(
     """
     store = Store(db_path or paths.db_path())
     core = Core(store)
+    if refreshed := core.refresh_stale_summaries():  # once after an analysis improvement
+        log.info("recomputed %d activity summaries for the current analysis", refreshed)
     app = FastAPI(title="fit-push", version=__version__)
     app.state.store = store
     app.state.core = core

@@ -24,6 +24,9 @@ HR_ZONE_BOUNDS = [0.6, 0.7, 0.8, 0.9]  # fraction of max HR; 5 zones
 EARTH_R = 6371008.8
 MAX_SERIES_POINTS = 1500
 MAX_TRACK_POINTS = 2500
+# Bump when the stored summary of an unchanged activity would come out differently; the
+# core then recomputes stored summaries once on start (Core.refresh_stale_summaries).
+ANALYSIS_VERSION = 2
 
 
 # --------------------------------------------------------------------------- conversion
@@ -116,6 +119,20 @@ def _centered_median(a: np.ndarray, window: int = 5) -> np.ndarray:
     return np.median(view, axis=1)
 
 
+def _nan_median(a: np.ndarray, window: int = 5) -> np.ndarray:
+    """Centered median ignoring NaNs; near the ends it uses the points that exist (no edge
+    padding, so a bad first or last value is not repeated into its own window)."""
+    if len(a) < 2:
+        return a
+    half = window // 2
+    padded = np.pad(a.astype(float), half, mode="constant", constant_values=np.nan)
+    view = np.lib.stride_tricks.sliding_window_view(padded, window)
+    out = np.full(len(a), np.nan)
+    ok = np.isfinite(view).any(axis=1)
+    out[ok] = np.nanmedian(view[ok], axis=1)
+    return out
+
+
 # --------------------------------------------------------------------------- preparation
 
 
@@ -173,16 +190,39 @@ def cumulative_distance(cols: dict[str, list]) -> list[float]:
     return [float(d) for d in dist]
 
 
+def _bridge_gps_gaps(a, d: np.ndarray) -> np.ndarray:
+    """Spread the distance covered during a GPS gap evenly over the gap's duration.
+
+    While a device has no position fix (tunnel, underpass, watch under a sleeve) its
+    distance freezes; when the fix comes back the whole gap's distance arrives in one
+    step, which reads as an absurd speed (and a fake best effort, and lost moving time).
+    Points without a position between two points with one get the distance interpolated
+    by time between those two. Totals and every point with a fix are unchanged.
+    """
+    fix = np.isfinite(a["lat"]) & np.isfinite(a["lon"])
+    vi = np.flatnonzero(fix)
+    if len(vi) < 2 or vi[-1] - vi[0] + 1 == len(vi):
+        return d  # no position at all, or no gap between the first and last fix
+    x = a["t"] if a["has_time"] else np.arange(len(d), dtype=float)
+    inside = np.zeros(len(d), dtype=bool)
+    inside[vi[0] : vi[-1] + 1] = True
+    gap = inside & ~fix
+    d = d.copy()
+    d[gap] = np.interp(x[gap], x[vi], d[vi])
+    return d
+
+
 def _distance(a, has_gps) -> tuple[np.ndarray, str]:
     n = len(a["t"])
     dev = a["dist"]
     if np.isfinite(dev).sum() >= 0.9 * n and np.nanmax(dev) > 0:
         d = np.maximum.accumulate(_ffill(dev))
-        return d - d[0], "device"
+        d = d - d[0]
+        return (_bridge_gps_gaps(a, d) if has_gps else d), "device"
     if has_gps:
         lat, lon = _ffill(a["lat"]), _ffill(a["lon"])
         step = np.concatenate([[0.0], haversine(lat[:-1], lon[:-1], lat[1:], lon[1:])])
-        return np.cumsum(step), "gps"
+        return _bridge_gps_gaps(a, np.cumsum(step)), "gps"
     if a["has_time"] and np.isfinite(a["speed"]).any():
         dt = np.concatenate([[0.0], np.diff(a["t"])])
         sp = np.nan_to_num(_ffill(a["speed"]))
@@ -330,16 +370,27 @@ def analyse(
         w = np.ones(n)
         elapsed = None
 
-    # Speed (smoothed over a ~5 s window, from distance)
-    if has_time and dist[-1] > 0:
-        i0 = np.searchsorted(t, t - 5.0)
+    # Speed. Prefer the speed the device recorded (GPS Doppler or a wheel sensor): it does
+    # not jump when positions do, unlike speed derived from distance, where GPS settling
+    # after a fix (tens of metres in a second or two) reads as 100+ km/h.
+    dev_speed = a["speed"]
+    if np.isfinite(dev_speed).sum() >= 0.5 * n and np.nanmax(dev_speed) > 0:
+        speed = _ffill(dev_speed)
+        speed[: int(np.argmax(np.isfinite(dev_speed)))] = np.nan  # no speed before the first reading
+    elif has_time and dist[-1] > 0:
+        # From distance over at least ~5 s: look back to the last point 5 s or more earlier.
+        # (Only points inside the last 5 s would shrink the window to a single interval
+        # with sparse "smart" recording, where a few metres of GPS noise read as 70 km/h.)
+        i0 = np.maximum(np.searchsorted(t, t - 5.0, side="right") - 1, 0)
         span = t - t[i0]
         speed = np.divide(dist - dist[i0], span, out=np.zeros(n), where=span > 0)
         speed[~np.isfinite(speed)] = 0
-    elif np.isfinite(a["speed"]).any():
-        speed = _ffill(a["speed"])
+    elif np.isfinite(dev_speed).any():
+        speed = _ffill(dev_speed)
     else:
         speed = np.full(n, np.nan)
+    if np.isfinite(speed).any():
+        speed = _nan_median(speed, 5)  # a one- or two-point blip never becomes the maximum
 
     # Elevation
     ele_raw = a["ele"]
