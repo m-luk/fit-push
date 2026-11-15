@@ -162,7 +162,7 @@ def _fit_ts(dt: datetime) -> int:
     return int(dt.timestamp()) - FIT_EPOCH
 
 
-def to_fit(pts, sport: int = 1) -> bytes:
+def to_fit(pts, sport: int = 1, sub_sport: int = 0) -> bytes:
     """Encode points as a minimal FIT activity (sport: 1=running, 2=cycling)."""
     body = b""
     # file_id: type, manufacturer, product, time_created
@@ -186,7 +186,7 @@ def to_fit(pts, sport: int = 1) -> bytes:
         prev = p
     # session: timestamp, sport, sub_sport
     body += _definition(2, 18, [(253, 4, 0x86), (5, 1, 0x00), (6, 1, 0x00)])
-    body += struct.pack("<BIBB", 2, _fit_ts(pts[-1]["t"]), sport, 0)
+    body += struct.pack("<BIBB", 2, _fit_ts(pts[-1]["t"]), sport, sub_sport)
 
     header = struct.pack("<BBHI4s", 14, 0x20, 2132, len(body), b".FIT")
     header += struct.pack("<H", _crc(header))

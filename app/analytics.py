@@ -10,19 +10,13 @@ from datetime import datetime, timezone
 
 import numpy as np
 
+from . import sports
 from .parsers import Activity
 
 CHANNELS = ("t", "lat", "lon", "ele", "hr", "cad", "power", "speed", "temp", "dist")
 
 DEFAULT_SETTINGS = {"max_hr": 190, "rest_hr": 60, "ftp": 250}
 
-MOVING_THRESHOLD = {"cycling": 1.0, "running": 0.6, "walking": 0.3, "hiking": 0.3}  # m/s
-BEST_EFFORT_DISTANCES = {
-    "running": [400, 1000, 1609.344, 5000, 10000, 21097.5, 42195],
-    "walking": [1000, 5000, 10000],
-    "hiking": [1000, 5000, 10000],
-    "cycling": [5000, 10000, 20000, 40000, 100000],
-}
 POWER_CURVE_DURATIONS = [5, 15, 30, 60, 120, 300, 600, 1200, 1800, 3600]
 HR_ZONE_BOUNDS = [0.6, 0.7, 0.8, 0.9]  # fraction of max HR; 5 zones
 EARTH_R = 6371008.8
@@ -311,7 +305,7 @@ def analyse(cols: dict[str, list], sport: str = "unknown", settings: dict | None
 
     # Moving detection: per-interval speed above sport threshold.
     if has_time:
-        thr = MOVING_THRESHOLD.get(sport, 0.5)
+        thr = sports.get(sport).moving_ms
         if dist[-1] > 0:
             seg_speed = np.divide(ddist, dt, out=np.zeros(n), where=dt > 0)
             moving = (seg_speed >= thr) & (dt > 0)
@@ -410,7 +404,7 @@ def analyse(cols: dict[str, list], sport: str = "unknown", settings: dict | None
         power_curve = _best_averages(p1, POWER_CURVE_DURATIONS)
 
     best_efforts = (
-        _best_efforts(dist, t, BEST_EFFORT_DISTANCES.get(sport, BEST_EFFORT_DISTANCES["running"]))
+        _best_efforts(dist, t, sports.get(sport).efforts)
         if has_time and dist[-1] > 0 else []
     )
     splits = _splits(dist, moving_time, ele_s, hr, power, split_m) if has_time and dist[-1] > 0 else []

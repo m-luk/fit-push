@@ -10,6 +10,8 @@ import struct
 from datetime import datetime, timezone
 from xml.sax.saxutils import escape
 
+from . import sports
+
 FORMATS = {
     "gpx": "application/gpx+xml",
     "tcx": "application/vnd.garmin.tcx+xml",
@@ -73,7 +75,7 @@ def to_gpx(cols: dict, name: str, sport: str) -> bytes:
 
 # --------------------------------------------------------------------------- TCX
 
-TCX_SPORT = {"running": "Running", "cycling": "Biking"}
+
 
 
 def to_tcx(cols: dict, name: str, sport: str, distance: list[float]) -> bytes:
@@ -86,7 +88,7 @@ def to_tcx(cols: dict, name: str, sport: str, distance: list[float]) -> bytes:
         '<?xml version="1.0" encoding="UTF-8"?>\n',
         '<TrainingCenterDatabase xmlns="http://www.garmin.com/xmlschemas/TrainingCenterDatabase/v2" '
         'xmlns:ns3="http://www.garmin.com/xmlschemas/ActivityExtension/v2">\n',
-        f'<Activities><Activity Sport="{TCX_SPORT.get(sport, "Other")}"><Id>{start}</Id>\n',
+        f'<Activities><Activity Sport="{sports.get(sport).tcx}"><Id>{start}</Id>\n',
         f'<Lap StartTime="{start}"><TotalTimeSeconds>{total_time:.1f}</TotalTimeSeconds>'
         f"<DistanceMeters>{distance[-1] if distance else 0:.1f}</DistanceMeters>"
         "<Intensity>Active</Intensity><TriggerMethod>Manual</TriggerMethod><Track>\n",
@@ -124,7 +126,6 @@ def to_tcx(cols: dict, name: str, sport: str, distance: list[float]) -> bytes:
 _CRC_TABLE = [0x0000, 0xCC01, 0xD801, 0x1400, 0xF001, 0x3C00, 0x2800, 0xE401,
               0xA001, 0x6C00, 0x7800, 0xB401, 0x5000, 0x9C01, 0x8801, 0x4400]
 FIT_EPOCH = 631065600  # 1989-12-31T00:00:00Z
-FIT_SPORT = {"running": 1, "cycling": 2, "swimming": 5, "walking": 11, "hiking": 17}
 
 # base types: (code, struct fmt, invalid value)
 ENUM, UINT8, UINT16, SINT32, UINT32 = (0x00, "B", 0xFF), (0x02, "B", 0xFF), \
@@ -181,7 +182,7 @@ def to_fit(cols: dict, name: str, sport: str, distance: list[float]) -> bytes:
     t0, t1 = rows[0][0]["t"], rows[-1][0]["t"]
     elapsed = t1 - t0
     total_dist = rows[-1][1] - rows[0][1] if distance else 0.0
-    sport_id = FIT_SPORT.get(sport, 0)
+    sport_id, sub_sport_id = sports.get(sport).fit
     semi = 2**31 / 180.0
 
     file_id = _FitMessage(0, 0, [(0, ENUM), (1, UINT16), (2, UINT16), (4, UINT32)])
@@ -217,7 +218,7 @@ def to_fit(cols: dict, name: str, sport: str, distance: list[float]) -> bytes:
     body += event.data(ts1, 0, 4)  # timer stop_all
     body += lap.definition + lap.data(ts1, _fit_ts(t0), elapsed * 1000, elapsed * 1000, total_dist * 100, 9, 1, sport_id)
     body += session.definition + session.data(ts1, _fit_ts(t0), elapsed * 1000, elapsed * 1000, total_dist * 100,
-                                              sport_id, 0, 8, 1, 0, 1)
+                                              sport_id, sub_sport_id, 8, 1, 0, 1)
     body += activity.definition + activity.data(ts1, elapsed * 1000, 1, 0, 26, 1)
 
     header = struct.pack("<BBHI4s", 14, 0x20, 2132, len(body), b".FIT")

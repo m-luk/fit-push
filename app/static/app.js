@@ -50,7 +50,21 @@
   }
 
   // ------------------------------------------------------------------ units & formatting
-  const PACE_SPORTS = new Set(["running", "walking", "hiking"]);
+  // Sport catalogue comes from GET /api/sports (app/sports.py is the single source).
+  let SPORTS = new Map();
+  const sportInfo = (s) => SPORTS.get(s);
+  const isPace = (s) => !!sportInfo(s)?.pace;
+  const cadenceUnit = (s) => sportInfo(s)?.cadence_unit || "spm";
+  const FAMILY_LABEL = { running: "Running", cycling: "Cycling", foot: "Walking & hiking", skiing: "Winter", water: "Water", swimming: "Swimming", other: "Other" };
+  // <option>s grouped by family; a sport that isn't in the catalogue (from an unusual file) is kept on top.
+  function sportSelectOptions(current) {
+    const opt = (k) => `<option value="${esc(k)}" ${k === current ? "selected" : ""}>${esc(sportName(k))}</option>`;
+    const groups = new Map();
+    for (const s of SPORTS.values()) (groups.get(s.family) || groups.set(s.family, []).get(s.family)).push(s.key);
+    return (SPORTS.has(current) ? "" : opt(current)) + [...groups].map(([fam, keys]) =>
+      keys.length === 1 ? opt(keys[0]) : `<optgroup label="${esc(FAMILY_LABEL[fam] || fam)}">${keys.map(opt).join("")}</optgroup>`).join("");
+  }
+  async function loadSports() { SPORTS = new Map((await api("/api/sports")).map((x) => [x.key, x])); }
   const UNITS = {
     metric: { dist: 1000, distL: "km", speed: 3.6, speedL: "km/h", ele: 1, eleL: "m", split: "km" },
     imperial: { dist: 1609.344, distL: "mi", speed: 2.23694, speedL: "mph", ele: 3.28084, eleL: "ft", split: "mi" },
@@ -70,9 +84,8 @@
   const fmtSpeed = (ms) => (ms == null ? "–" : fmtNum(ms * u().speed, 1));
   const fmtDate = (iso) => (iso ? new Date(iso).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }) : "No date");
   const fmtDay = (iso) => (iso ? new Date(iso).toLocaleDateString(undefined, { dateStyle: "medium" }) : "");
-  const SPORT_ICON = { running: "🏃", cycling: "🚴", walking: "🚶", hiking: "🥾", swimming: "🏊" };
-  const sportIcon = (s) => SPORT_ICON[s] || "⏱️";
-  const sportName = (s) => (s || "unknown").replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase());
+  const sportIcon = (s) => sportInfo(s)?.icon || "⏱️";
+  const sportName = (s) => sportInfo(s)?.label || (s || "unknown").replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase());
   function effortLabel(m) {
     const named = { 1609.344: "1 mile", 21097.5: "Half marathon", 42195: "Marathon" };
     if (named[m]) return named[m];
@@ -327,7 +340,7 @@
 
   function recordsCard(sport, recs) {
     if (!recs.length) return "";
-    const pace = PACE_SPORTS.has(sport);
+    const pace = isPace(sport);
     return `<div class="card"><h2>${sportIcon(sport)} ${esc(sportName(sport))} — best efforts</h2><div class="table-scroll"><table>
       <thead><tr><th>Distance</th><th>Time</th><th>${pace ? "Pace /" + u().distL : "Speed " + u().speedL}</th><th>Activity</th></tr></thead><tbody>
       ${recs.map((r) => { const ms = r.distance_m / r.time_s; return `<tr><td>${effortLabel(r.distance_m)}</td><td>${fmtDur(r.time_s)}</td>
@@ -432,9 +445,7 @@
     // Segment efforts inside the current view (indices are absolute, like the window).
     const efforts = (a.segment_efforts || []).filter((e) => !a.window || (e.start >= a.window.start && e.end <= a.window.end));
     const s = a.summary;
-    const pace = PACE_SPORTS.has(a.sport);
-    const sportOpts = ["running", "cycling", "walking", "hiking", "swimming", "unknown"];
-    if (!sportOpts.includes(a.sport)) sportOpts.unshift(a.sport);
+    const pace = isPace(a.sport);
 
     const tiles = [
       s.distance_m ? tile("Distance", fmtDist(s.distance_m), u().distL) : "",
@@ -451,7 +462,7 @@
       s.tss ? tile("TSS", fmtNum(s.tss, 0)) : "",
       s.work_kj ? tile("Work", fmtNum(s.work_kj, 0), "kJ") : "",
       s.trimp ? tile("TRIMP", fmtNum(s.trimp, 0)) : "",
-      s.avg_cadence ? tile("Avg cadence", fmtNum(s.avg_cadence, 0), a.sport === "cycling" ? "rpm" : "spm") : "",
+      s.avg_cadence ? tile("Avg cadence", fmtNum(s.avg_cadence, 0), cadenceUnit(a.sport)) : "",
       s.avg_temp_c != null ? tile("Avg temp", fmtNum(s.avg_temp_c, 0), "°C") : "",
     ].join("");
 
@@ -464,7 +475,7 @@
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
           ${a.window ? "" : `<span class="export-group" aria-label="Export full activity"><span class="muted">Export</span>${exportLinks(a, null)}</span>`}
           ${a.track && !a.window ? `<button class="btn" id="seg-act-btn" title="Make the whole activity a segment and find it in all activities">Create segment</button>` : ""}
-          <select id="sport-sel" aria-label="Sport">${sportOpts.map((o) => `<option value="${esc(o)}" ${o === a.sport ? "selected" : ""}>${esc(sportName(o))}</option>`).join("")}</select>
+          <select id="sport-sel" aria-label="Sport">${sportSelectOptions(a.sport)}</select>
           <button class="btn danger" id="del-btn">Delete</button>
         </div>
       </div>
@@ -558,7 +569,7 @@
 
   // ------------------------------------------------------------------ segments on an activity
   function segEffortsTable(a, efforts) {
-    const pace = PACE_SPORTS.has(a.sport);
+    const pace = isPace(a.sport);
     const has = (k) => efforts.some((e) => e[k] != null);
     return `<table><thead><tr><th>Segment</th><th>Time</th><th>${pace ? "Pace" : "Speed"}</th>${has("avg_hr") ? "<th>Avg HR</th>" : ""}${has("avg_power") ? "<th>Power</th>" : ""}<th>Rank</th><th></th></tr></thead><tbody>
       ${efforts.map((e) => `<tr data-effort="${e.id}" tabindex="0" aria-selected="false">
@@ -764,7 +775,7 @@
 
   // Parameters that can colour the track. Values are per series point (same index as lat/lon).
   function overlayDefs(a) {
-    const se = a.series, pace = PACE_SPORTS.has(a.sport), defs = [];
+    const se = a.series, pace = isPace(a.sport), defs = [];
     const moving = (v) => (v != null && v >= 0.3 ? v : null);
     if (se.speed_ms && se.distance_m.at(-1) > 0) {
       defs.push({ key: "speed", label: pace ? "Pace" : "Speed", values: se.speed_ms.map(moving),
@@ -865,7 +876,7 @@
 
   function streamDefs(a) {
     const se = a.series;
-    const pace = PACE_SPORTS.has(a.sport);
+    const pace = isPace(a.sport);
     const defs = [];
     if (se.elevation_m) defs.push({ key: "elevation", label: `Elevation (${u().eleL})`, color: "--m-elevation", fill: true, y: se.elevation_m.map((v) => (v == null ? null : v * u().ele)), fmt: (v) => `${fmtNum(v, 0)} ${u().eleL}` });
     if (se.speed_ms && se.distance_m.at(-1) > 0) {
@@ -879,7 +890,7 @@
     }
     if (se.hr) defs.push({ key: "hr", label: "Heart rate (bpm)", color: "--m-hr", y: se.hr, fmt: (v) => `${fmtNum(v, 0)} bpm` });
     if (se.power) defs.push({ key: "power", label: "Power (W, 5 s avg)", color: "--m-power", y: se.power, fmt: (v) => `${fmtNum(v, 0)} W` });
-    if (se.cadence) defs.push({ key: "cadence", label: `Cadence (${a.sport === "cycling" ? "rpm" : "spm"})`, color: "--m-cadence", y: se.cadence, fmt: (v) => fmtNum(v, 0) });
+    if (se.cadence) defs.push({ key: "cadence", label: `Cadence (${cadenceUnit(a.sport)})`, color: "--m-cadence", y: se.cadence, fmt: (v) => fmtNum(v, 0) });
     if (se.temp_c) defs.push({ key: "temp", label: "Temperature (°C)", color: "--m-temp", y: se.temp_c, fmt: (v) => `${fmtNum(v, 0)} °C` });
     return defs;
   }
@@ -1044,7 +1055,7 @@
 
   // ------------------------------------------------------------------ laps view
   function renderLaps(a, r) {
-    const pace = PACE_SPORTS.has(a.sport);
+    const pace = isPace(a.sport);
     const laps = r.laps, st = r.lap_time_stats;
     const withUnit = (v, f, unit) => (v == null ? "–" : `${f(v)}${unit ? " " + unit : ""}`);
     const speedTxt = (ms) => (ms == null ? "–" : pace ? `${fmtPace(ms)} /${u().distL}` : `${fmtSpeed(ms)} ${u().speedL}`);
@@ -1070,7 +1081,7 @@
       ["Avg heart rate", (c) => withUnit(c.avg_hr, (v) => fmtNum(v, 0), "bpm"), "avg_hr"],
       ["Max heart rate", (c) => withUnit(c.max_hr, (v) => fmtNum(v, 0), "bpm"), "max_hr"],
       ["Avg power", (c) => withUnit(c.avg_power, (v) => fmtNum(v, 0), "W"), "avg_power"],
-      ["Avg cadence", (c) => withUnit(c.avg_cadence, (v) => fmtNum(v, 0), a.sport === "cycling" ? "rpm" : "spm"), "avg_cadence"],
+      ["Avg cadence", (c) => withUnit(c.avg_cadence, (v) => fmtNum(v, 0), cadenceUnit(a.sport)), "avg_cadence"],
     ].filter(([, , k]) => r.whole[k] != null || r.section[k] != null);
 
     const renderCompare = () => {
@@ -1268,7 +1279,7 @@
     if (stale(token)) return;
     state.currentSegment = s.id;
     renderSegList();
-    const pace = PACE_SPORTS.has(s.sport);
+    const pace = isPace(s.sport);
     const speedTxt = (ms) => (ms == null ? "–" : pace ? `${fmtPace(ms)} /${u().distL}` : `${fmtSpeed(ms)} ${u().speedL}`);
     const best = s.efforts[0];
     const effortHref = (e) => `#/activity/${e.activity_id}?effort=${e.id}`;
@@ -1361,5 +1372,5 @@
     renderActivity(Number(m[1]), win, { laps: q.get("laps") === "1", effort: q.has("effort") ? Number(q.get("effort")) : null });
   }
   window.addEventListener("hashchange", route);
-  Promise.all([loadList(), loadSegments()]).then(route).catch((e) => { main.innerHTML = `<div class="welcome"><h1>Cannot reach the server</h1><p class="muted">${esc(e.message)}</p></div>`; });
+  loadSports().then(() => Promise.all([loadList(), loadSegments()])).then(route).catch((e) => { main.innerHTML = `<div class="welcome"><h1>Cannot reach the server</h1><p class="muted">${esc(e.message)}</p></div>`; });
 })();

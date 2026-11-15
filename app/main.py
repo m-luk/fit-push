@@ -15,7 +15,7 @@ from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import writers
+from . import sports, writers
 from .analytics import activity_to_columns, analyse, cumulative_distance, point_count, window_columns
 from .laps import detect_laps, lap_report
 from .segments import SegmentError, build_segment, effort_stats, find_efforts
@@ -309,6 +309,12 @@ def create_app(db_path: str | None = None) -> FastAPI:
     def activity_segments(activity_id: int):
         _get_row(activity_id)
         return store.efforts_for_activity(activity_id)
+
+    # ------------------------------------------------------------------ sports
+    @app.get("/api/sports")
+    def list_sports():
+        """Sport catalogue for the UI: key, label, icon, family, pace, moving threshold, cadence unit."""
+        return sports.catalogue()
 
     # ------------------------------------------------------------------ settings
     @app.get("/api/settings")

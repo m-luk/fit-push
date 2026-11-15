@@ -11,6 +11,8 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
+from . import sports
+
 SEMICIRCLE = 180.0 / 2**31
 
 
@@ -41,23 +43,9 @@ class Activity:
     points: list[Point] = field(default_factory=list)
 
 
-SPORT_ALIASES = {
-    "running": "running", "run": "running", "trail_running": "running", "treadmill": "running",
-    "cycling": "cycling", "biking": "cycling", "bike": "cycling", "ride": "cycling",
-    "mountain_biking": "cycling", "road_biking": "cycling", "virtual_ride": "cycling",
-    "e_biking": "cycling",
-    "walking": "walking", "walk": "walking",
-    "hiking": "hiking", "hike": "hiking",
-    "swimming": "swimming", "swim": "swimming",
-}
-
-
-def normalise_sport(raw: str | None) -> str:
-    if not raw:
-        return "unknown"
-    key = str(raw).strip().lower().replace(" ", "_").replace("-", "_")
-    return SPORT_ALIASES.get(key, key or "unknown")
-
+def normalise_sport(raw: str | None, sub: str | None = None) -> str:
+    """Sport key from the catalogue in ``sports.py`` (sub-sport refines generic sports)."""
+    return sports.normalise(raw, sub)
 
 def _utc(dt: datetime | None) -> datetime | None:
     if dt is None:
@@ -194,6 +182,7 @@ def parse_fit(data: bytes) -> Activity:
     import fitdecode
 
     act = Activity(source_format="fit")
+    fit_sport = None
     try:
         with fitdecode.FitReader(
             io.BytesIO(data),
@@ -207,11 +196,9 @@ def parse_fit(data: bytes) -> Activity:
                     act.points.append(_fit_record(frame))
                 elif frame.name in ("session", "sport"):
                     sport = _fit_get(frame, "sport")
-                    sub = _fit_get(frame, "sub_sport")
-                    if sport is not None and act.sport == "unknown":
-                        act.sport = normalise_sport(sport)
-                        if sub in ("virtual_activity", "indoor_cycling") and act.sport == "cycling":
-                            act.sport = "cycling"
+                    # The session message is authoritative; a "sport" message only fills in.
+                    if sport is not None and (frame.name == "session" or fit_sport is None):
+                        fit_sport = (sport, _fit_get(frame, "sub_sport"))
                     name = _fit_get(frame, "name")
                     if name and not act.name:
                         act.name = str(name)
@@ -223,6 +210,8 @@ def parse_fit(data: bytes) -> Activity:
     except fitdecode.FitError as exc:
         if not act.points:
             raise ParseError(f"invalid FIT: {exc}") from exc
+    if fit_sport is not None:
+        act.sport = normalise_sport(*fit_sport)
     return act
 
 
