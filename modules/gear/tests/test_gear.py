@@ -138,3 +138,30 @@ def test_services_for_importers(make_client):
     svc["assign"](aid, other_bike)
     assert sorted(_ids(client, aid)) == sorted([other_bike, shoes])  # same kind replaced
     assert client.get(f"{API}/activity/{aid}").json()["manual"] is True
+
+
+def test_unassigned_list_and_batch_assign(make_client):
+    client = make_client(modules="gear")
+    run = upload(client, "run.gpx", to_gpx(synthetic_track()))
+    ride = upload(client, "ride.gpx", to_gpx(synthetic_track(start=START.replace(day=2)), sport="cycling"))
+    assert client.get(f"{API}/gear").json()["no_gear"] == 2
+    rows = client.get(f"{API}/unassigned").json()
+    assert [r["id"] for r in rows] == [ride, run]  # newest first
+    assert {"name", "sport", "start_time", "distance_m"} <= set(rows[0])
+    assert [r["id"] for r in client.get(f"{API}/unassigned", params={"sport": "cycling"}).json()] == [ride]
+
+    shoes, other_shoes = _gear(client, "Pegasus", "shoes"), _gear(client, "Speedgoat", "shoes")
+    bike = _gear(client, "Gravel", "bike")
+    assert client.post(f"{API}/assign", json={"gear_id": shoes, "activity_ids": [run, ride, run]}).json() == {
+        "updated": 2
+    }
+    assert client.get(f"{API}/unassigned").json() == []
+    assert client.get(f"{API}/gear").json()["no_gear"] == 0
+    client.post(f"{API}/assign", json={"gear_id": bike, "activity_ids": [ride]})
+    client.post(f"{API}/assign", json={"gear_id": other_shoes, "activity_ids": [ride]})
+    assert sorted(_ids(client, ride)) == sorted([bike, other_shoes])  # same kind replaced, bike kept
+    assert client.get(f"{API}/activity/{run}").json()["manual"] is True
+
+    assert client.post(f"{API}/assign", json={"gear_id": 999, "activity_ids": [run]}).status_code == 404
+    assert client.post(f"{API}/assign", json={"gear_id": shoes, "activity_ids": [run, 999]}).status_code == 404
+    assert client.post(f"{API}/assign", json={"gear_id": shoes, "activity_ids": []}).status_code == 422

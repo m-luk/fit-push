@@ -10,6 +10,8 @@ Endpoints (under /api/m/gear):
     PUT    /activity/{id}             {gear_ids: [...]}: manual choice
     POST   /activity/{id}/reset       back to the defaults
     POST   /apply-defaults            defaults for activities that have no gear yet
+    GET    /unassigned                activities without any gear (optional ?sport=)
+    POST   /assign                    {gear_id, activity_ids: [...]}: add one item to many activities
 """
 
 from __future__ import annotations
@@ -46,6 +48,11 @@ class TargetsIn(BaseModel):
 
 class ActivityGearIn(BaseModel):
     gear_ids: list[int] = Field(max_length=20)
+
+
+class BatchIn(BaseModel):
+    gear_id: int
+    activity_ids: list[int] = Field(min_length=1, max_length=10_000)
 
 
 def register(ctx: ModuleContext) -> None:
@@ -211,7 +218,17 @@ def register(ctx: ModuleContext) -> None:
         for s in ctx.core.sports():
             groups.setdefault(s["family"], []).append(s["key"])
         unassigned = len(missing(list(acts.values())))
-        return {"gear": items, "defaults": defaults, "kinds": KINDS, "groups": groups, "unassigned": unassigned}
+        no_gear = len(acts) - len(
+            {u["activity_id"] for u in ctx.db.query(f"SELECT DISTINCT activity_id FROM {use_t}")} & set(acts)
+        )
+        return {
+            "gear": items,
+            "defaults": defaults,
+            "kinds": KINDS,
+            "groups": groups,
+            "unassigned": unassigned,
+            "no_gear": no_gear,
+        }
 
     @ctx.router.post("/gear", status_code=201)
     def add_gear(body: GearIn) -> dict:
@@ -293,3 +310,31 @@ def register(ctx: ModuleContext) -> None:
         for aid, ids in todo:
             set_use(aid, ids)
         return {"updated": len(todo)}
+
+    @ctx.router.get("/unassigned")
+    def unassigned(sport: str | None = None) -> list[dict]:
+        """Activities without any gear, newest first."""
+        has = {r["activity_id"] for r in ctx.db.query(f"SELECT DISTINCT activity_id FROM {use_t}")}
+        return [
+            {
+                "id": a["id"],
+                "name": a["name"],
+                "sport": a["sport"],
+                "start_time": a["start_time"],
+                "distance_m": float(a["summary"].get("distance_m") or 0),
+            }
+            for a in ctx.core.list_activities(sport=sport or None)
+            if a["id"] not in has
+        ]
+
+    @ctx.router.post("/assign")
+    def assign_many(body: BatchIn) -> dict:
+        """Add one item to many activities (replacing their gear of the same kind; a manual choice)."""
+        item(body.gear_id)
+        known = {a["id"] for a in ctx.core.list_activities()}
+        unknown = [aid for aid in body.activity_ids if aid not in known]
+        if unknown:
+            raise NotFound(f"activities not found: {', '.join(map(str, unknown[:10]))}")
+        for aid in dict.fromkeys(body.activity_ids):
+            svc_assign(aid, body.gear_id)
+        return {"updated": len(dict.fromkeys(body.activity_ids))}

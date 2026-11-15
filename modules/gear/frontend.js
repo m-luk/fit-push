@@ -30,19 +30,93 @@
     icon: "👟",
     async render(el, ctx) {
       let data = null, editing = null; // editing: null | "new" | gear id
+      // view state (URL): view=nogear lists activities without gear, sport filters that list
+      let view = ctx.params.get("view") === "nogear" ? "nogear" : "gear";
+      let sportFilter = ctx.params.get("sport") || "";
+      let noGear = [], picked = new Set(), lastClicked = null;
       el.innerHTML = `
         <div class="page-head"><div><h1>Gear</h1><div class="sub" id="gr-sub">Loading…</div></div>
-          <div><button type="button" class="btn primary" id="gr-add">Add gear</button></div></div>
+          <div class="gr-head-actions">
+            <span class="seg" role="group" aria-label="View">
+              <button type="button" data-view="gear">Gear</button><button type="button" data-view="nogear" id="gr-nogear-btn">No gear</button></span>
+            <button type="button" class="btn primary" id="gr-add">Add gear</button></div></div>
         <div id="gr-notice"></div>
         <div id="gr-new"></div>
-        <div class="gr-grid" id="gr-list"></div>`;
+        <div class="gr-grid" id="gr-list"></div>
+        <div id="gr-batch"></div>`;
       const $ = (s) => el.querySelector(s);
 
       async function load() {
-        const d = await send("/gear", "GET");
+        const [d, list] = await Promise.all([send("/gear", "GET"), view === "nogear" ? send("/unassigned", "GET") : null]);
         if (ctx.isStale()) return;
         data = d;
+        if (list) {
+          noGear = list;
+          const ids = new Set(list.map((a) => a.id));
+          picked = new Set([...picked].filter((id) => ids.has(id)));
+        }
         draw();
+      }
+
+      function setView(v) {
+        view = v; picked.clear(); lastClicked = null;
+        ctx.setParams({ view: v === "nogear" ? v : null, sport: v === "nogear" ? sportFilter : null });
+        load().catch((e) => sdk.toast(e.message));
+      }
+
+      // ---- activities without gear: filter, select, add one item to all selected
+      const shown = () => noGear.filter((a) => !sportFilter || a.sport === sportFilter);
+
+      function drawBatch() {
+        const box = $("#gr-batch");
+        if (view !== "nogear") { box.innerHTML = ""; return; }
+        if (!noGear.length) { box.innerHTML = '<div class="card muted">Every activity has gear.</div>'; return; }
+        const rows = shown();
+        const sports = [...new Set(noGear.map((a) => a.sport))];
+        const usable = data.gear.filter((g) => !g.retired);
+        const u = sdk.fmt.units();
+        const sportOpt = (k) => `<option value="${esc(k)}"${k === sportFilter ? " selected" : ""}>${esc(sdk.sports.icon(k))} ${esc(sdk.sports.name(k))} (${noGear.filter((a) => a.sport === k).length})</option>`;
+        const picker = usable.length
+          ? `<select id="gr-pick" aria-label="Gear to add">${usable.map((g) => `<option value="${g.id}">${kindIcon(g.kind)} ${esc(g.name)}</option>`).join("")}</select>
+             <button type="button" class="btn primary small" id="gr-batch-add">Add to selected</button>`
+          : '<span class="muted gr-small">Add gear first to assign it here.</span>';
+        const row = (a) => `<tr data-aid="${a.id}">
+            <td class="gr-cb"><input type="checkbox" data-pick="${a.id}" aria-label="Select ${esc(a.name)}"${picked.has(a.id) ? " checked" : ""}></td>
+            <td class="gr-date">${a.start_time ? esc(sdk.fmt.day(a.start_time)) : "–"}</td>
+            <td class="gr-name"><a href="#/activity/${a.id}">${esc(a.name)}</a></td>
+            <td>${esc(sdk.sports.icon(a.sport))} ${esc(sdk.sports.name(a.sport))}</td>
+            <td class="num">${a.distance_m ? esc(sdk.fmt.dist(a.distance_m, 1)) : "–"}</td></tr>`;
+        box.innerHTML = `<div class="card gr-batch">
+          <div class="gr-batch-bar">
+            <select id="gr-sport" aria-label="Filter by sport"><option value="">All sports (${noGear.length})</option>${sports.map(sportOpt).join("")}</select>
+            <span class="muted gr-small" id="gr-selcount" role="status"></span>
+            <span class="gr-spacer"></span>${picker}
+          </div>
+          <div class="table-scroll gr-batch-scroll"><table class="gr-table">
+            <thead><tr><th class="gr-cb"><input type="checkbox" id="gr-all" aria-label="Select all shown activities"></th>
+              <th>Date</th><th>Activity</th><th>Sport</th><th class="num">Distance (${esc(u.distL)})</th></tr></thead>
+            <tbody>${rows.map(row).join("")}</tbody></table></div></div>`;
+        syncPicked();
+      }
+
+      function syncPicked() {
+        const rows = shown(), n = rows.filter((a) => picked.has(a.id)).length;
+        const all = $("#gr-all");
+        if (all) { all.checked = n > 0 && n === rows.length; all.indeterminate = n > 0 && n < rows.length; }
+        if ($("#gr-selcount")) $("#gr-selcount").textContent = `${n} of ${rows.length} selected`;
+        if ($("#gr-batch-add")) $("#gr-batch-add").disabled = n === 0;
+      }
+
+      async function addToSelected() {
+        const gid = +$("#gr-pick").value, ids = shown().filter((a) => picked.has(a.id)).map((a) => a.id);
+        const g = data.gear.find((x) => x.id === gid);
+        if (!ids.length || !g) return;
+        try {
+          const r = await send("/assign", "POST", { gear_id: gid, activity_ids: ids });
+          sdk.toast(`${g.name} added to ${r.updated} activit${r.updated === 1 ? "y" : "ies"}`);
+          picked.clear(); lastClicked = null;
+          await load();
+        } catch (e) { sdk.toast(e.message); }
       }
 
       function stats(g) {
@@ -112,6 +186,14 @@
       }
 
       function draw() {
+        el.querySelectorAll("[data-view]").forEach((b) => {
+          b.classList.toggle("active", b.dataset.view === view);
+          b.setAttribute("aria-pressed", String(b.dataset.view === view));
+        });
+        $("#gr-nogear-btn").textContent = `No gear (${data.no_gear})`;
+        $("#gr-add").hidden = view !== "gear";
+        $("#gr-list").hidden = $("#gr-new").hidden = view !== "gear";
+        drawBatch();
         const active = data.gear.filter((g) => !g.retired).length;
         $("#gr-sub").textContent = data.gear.length
           ? `${active} in use${data.gear.length > active ? `, ${data.gear.length - active} retired` : ""}`
@@ -149,12 +231,43 @@
       let pendingDelete = null, deleteTimer = null;
       el.addEventListener("submit", (ev) => { ev.preventDefault(); save(ev.target); });
       el.addEventListener("change", (ev) => {
+        if (ev.target.id === "gr-sport") {
+          sportFilter = ev.target.value; picked.clear(); lastClicked = null;
+          ctx.setParams({ view: "nogear", sport: sportFilter });
+          drawBatch();
+          return;
+        }
+        if (ev.target.id === "gr-all") {
+          for (const a of shown()) ev.target.checked ? picked.add(a.id) : picked.delete(a.id);
+          el.querySelectorAll("[data-pick]").forEach((c) => (c.checked = ev.target.checked));
+          syncPicked();
+          return;
+        }
         if (ev.target.name !== "kind") return;
         const f = ev.target.form, g = data.gear.find((x) => String(x.id) === f.dataset.form);
         const checked = new Set([...f.querySelectorAll("[name=target]:checked")].map((c) => c.value));
         f.querySelector(".gr-target-list").innerHTML = targetBoxes(g ? { ...g, defaults: [...checked] } : { id: null, defaults: [...checked] }, ev.target.value);
       });
       el.addEventListener("click", async (ev) => {
+        const vb = ev.target.closest("[data-view]");
+        if (vb) { if (vb.dataset.view !== view) setView(vb.dataset.view); return; }
+        if (ev.target.closest("#gr-batch-add")) { addToSelected(); return; }
+        const row = ev.target.closest("tr[data-aid]");
+        if (row && !ev.target.closest("a")) {
+          // a click anywhere on the row toggles it; Shift+click sets the whole range from the last row
+          const id = +row.dataset.aid, box = row.querySelector("[data-pick]");
+          if (ev.target !== box) box.checked = !box.checked;
+          const on = box.checked, ids = shown().map((a) => a.id);
+          if (ev.shiftKey && lastClicked !== null && ids.includes(lastClicked)) {
+            const [i, j] = [ids.indexOf(lastClicked), ids.indexOf(id)].sort((x, y) => x - y);
+            for (const rid of ids.slice(i, j + 1)) on ? picked.add(rid) : picked.delete(rid);
+            el.querySelectorAll("[data-pick]").forEach((c) => (c.checked = picked.has(+c.dataset.pick)));
+          } else if (on) picked.add(id);
+          else picked.delete(id);
+          lastClicked = id;
+          syncPicked();
+          return;
+        }
         if (ev.target.closest("#gr-add")) { editing = "new"; draw(); return; }
         if (ev.target.closest("#gr-apply")) {
           try {

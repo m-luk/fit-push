@@ -26,6 +26,10 @@ Backend (`/api/m/gear/...`):
   `POST /activity/{id}/reset` (back to defaults).
 - `POST /apply-defaults`: give defaults to activities that have no gear yet (e.g.
   activities imported before the module or before the defaults were set).
+- `GET /unassigned` (`?sport=`): activities without any gear, newest first (`id, name,
+  sport, start_time, distance_m`); `GET /gear` also returns their count as `no_gear`.
+- `POST /assign` `{gear_id, activity_ids: [...]}`: add one item to many activities at
+  once (replacing their gear of the same kind; counts as a manual choice).
 
 Resolution: for each kind, a default for the exact sport wins over a default for its
 group; retired items are never assigned automatically.
@@ -44,7 +48,9 @@ Services for other modules (`ctx.service("gear", name)`, used by importers):
   keys where its kind has no default yet (existing defaults are never taken over).
 
 Frontend: the **Gear** page (`#/m/gear`) lists items with totals and a limit bar, with
-forms to add/edit them and pick their defaults; the **Gear** activity card shows and
+forms to add/edit them and pick their defaults, and a **No gear** view (`?view=nogear`,
+`&sport=`) listing activities without gear with checkboxes to add an item to many at
+once; the **Gear** activity card shows and
 changes the gear of one activity (hidden while no gear exists).
 
 ## Data

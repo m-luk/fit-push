@@ -10,6 +10,8 @@ How to update it: see "Changelog" in `AGENTS.md`.
 
 ### Added
 
+- **Gear** module: a **No gear** view lists activities without gear (filterable by
+  sport); select several (Shift+click for a range) and add an item to all of them at once.
 - **Strava import** module: import a Strava data export (zip). New activities are
   imported; ones you already have are recognised and get their Strava title, sport type,
   bike or shoes (with their default sports), commute tag, description and private note.

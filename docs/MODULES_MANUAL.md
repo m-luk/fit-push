@@ -45,7 +45,7 @@ long ago). Clicking a route opens that activity.
 
 ## Gear
 
-*Module `gear` v0.2.0 · owner @m-luk*
+*Module `gear` v0.3.0 · owner @m-luk*
 
 
 ### What it does
@@ -58,7 +58,7 @@ sports (e.g. All cycling), and every new activity of that sport gets it automati
 
 ### How to use
 
-1. Open **Gear** in the sidebar and click **Add gear**.
+1. Open **Gear** in the navigation bar at the top and click **Add gear**.
 2. Enter a **Name**, choose the **Kind**, and optionally a **Starting distance** (what
    the item had before you started tracking it) and **Replace after** (the distance
    limit). Add **Notes** if you like.
@@ -69,9 +69,14 @@ sports (e.g. All cycling), and every new activity of that sport gets it automati
    set a road bike for **All cycling** and an MTB for **Mountain biking**.
 4. Activities you imported before setting defaults have no gear: click **Apply
    defaults** in the notice at the top of the **Gear** page.
-5. On an activity page, the **Gear** card shows its gear. Click **Change**, tick the
+5. To give gear to many activities at once, click **No gear (N)** at the top of the
+   **Gear** page. It lists every activity without gear; narrow it with the sport
+   filter, tick activities (click a row, **Shift**+click for a range, or the box in the
+   header for all shown), pick an item and click **Add to selected**. Click **Gear** to
+   go back to your items.
+6. On an activity page, the **Gear** card shows its gear. Click **Change**, tick the
    items you used and click **Save**. **Reset to defaults** undoes a manual choice.
-6. When an item is worn out, click **Retire**: it keeps its history but is no longer
+7. When an item is worn out, click **Retire**: it keeps its history but is no longer
    assigned automatically. **Unretire** brings it back; **Delete** (click twice) removes
    it and its history.
 

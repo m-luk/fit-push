@@ -37,3 +37,23 @@
 .gr-chip { font-size: 13px; padding: 2px 9px; }
 .gr-choose { display: flex; flex-direction: column; gap: 8px; }
 .gr-grid > .gr-item:has(form) { grid-column: 1 / -1; }
+.gr-head-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.gr-batch { display: flex; flex-direction: column; gap: 10px; }
+.gr-batch-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.gr-spacer { flex: 1; }
+.gr-batch-scroll { max-height: 60vh; overflow: auto; }
+.gr-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.gr-table th { position: sticky; top: 0; z-index: 1; background: var(--surface-1); text-align: left; font-weight: 600; color: var(--text-secondary); }
+.gr-table th, .gr-table td { padding: 6px 8px; border-bottom: 1px solid var(--grid); white-space: nowrap; }
+.gr-table th.num, .gr-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.gr-table tbody tr { cursor: pointer; }
+.gr-table tbody tr:hover td { background: var(--surface-2); }
+.gr-table tbody tr:has(input:checked) td { background: var(--sel-fill); }
+.gr-table .gr-name { white-space: normal; min-width: 140px; }
+.gr-cb { width: 28px; }
+.gr-cb input { accent-color: var(--accent); }
+#gr-list[hidden], #gr-new[hidden], #gr-add[hidden] { display: none; }
+.gr-table tbody { user-select: none; }
+.gr-table .gr-date { font-variant-numeric: tabular-nums; }
+.gr-table td { text-align: left; }
+.gr-table td.num { text-align: right; }
