@@ -1,0 +1,12 @@
+/* Strava import module: classes prefixed si-, colours from tokens only. */
+.si-form { display: grid; gap: 12px; }
+.si-file { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; color: var(--text-secondary); }
+.si-file input { max-width: 100%; color: var(--text-primary); }
+.si-opts { border: 0; padding: 0; margin: 0; display: grid; gap: 6px; }
+.si-opts legend { color: var(--text-secondary); margin-bottom: 6px; padding: 0; }
+.si-opts label { display: flex; gap: 8px; align-items: flex-start; color: var(--text-primary); }
+.si-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.si-warn { color: var(--text-secondary); }
+.si-table { width: 100%; border-collapse: collapse; }
+.si-table th, .si-table td { text-align: left; vertical-align: top; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+.si-small { font-size: 0.85em; }

@@ -8,3 +8,4 @@ Modules installed in this repository (SDK 1.1). Each row comes from the module's
 |---|---|---|---|---|---|---|
 | [activity_map](activity_map/README.md) | All activities map | 1.0.0 | [@m-luk](https://github.com/m-luk) | One big map with all your routes, filtered by sport, tag and date, coloured by sport or date | page, api | [manual](activity_map/MANUAL.md) |
 | [gear](gear/README.md) | Gear | 0.2.0 | [@m-luk](https://github.com/m-luk) | Track shoes, bikes and other gear: usage totals, limits and default gear per sport or sport group | page, activity-card, api, events | [manual](gear/MANUAL.md) |
+| [strava_import](strava_import/README.md) | Strava import | 0.1.0 | [@m-luk](https://github.com/m-luk) | Import a Strava data export (zip): new activities plus titles, sport types, gear, commutes and notes for the ones you have | page, activity-card, api | [manual](strava_import/MANUAL.md) |

@@ -1,0 +1,12 @@
+{
+  "id": "strava_import",
+  "name": "Strava import",
+  "version": "0.1.0",
+  "summary": "Import a Strava data export (zip): new activities plus titles, sport types, gear, commutes and notes for the ones you have",
+  "owner": { "github": "m-luk" },
+  "maintainers": [],
+  "sdk": "1",
+  "provides": ["page", "activity-card", "api"],
+  "depends": [],
+  "enabled_by_default": true
+}
