@@ -12,6 +12,9 @@
     current: null,
     period: "week",
     metric: "distance_m",
+    overlay: lsGet("overlay") || "none",
+    lap: null,        // selected lap number in the laps view
+    lapRange: null,   // its series range, to notice when the selection moves elsewhere
   };
   const $ = (sel, root = document) => root.querySelector(sel);
   const main = $("#main");
@@ -341,9 +344,10 @@
   }
 
   // ------------------------------------------------------------------ activity view
-  let map, hoverMarker, selLine;
+  let map, hoverMarker, selLine, baseLine, overlayLayer, legendCtl, trackBounds;
+  let mapMarkers = [];
 
-  const activityHash = (id, w) => `#/activity/${id}` + (w ? `?start=${w.start}&end=${w.end}` : "");
+  const activityHash = (id, w, laps) => `#/activity/${id}` + (w ? `?start=${w.start}&end=${w.end}${laps ? "&laps=1" : ""}` : "");
   function windowQuery(w) { return w ? `&start=${w.start}&end=${w.end}` : ""; }
   function exportLinks(a, w) {
     const timed = !!a.series.time_s;
@@ -354,8 +358,8 @@
         : `<a class="btn small" href="/api/activities/${a.id}/export?format=${f}${windowQuery(w)}" download>${f.toUpperCase()}</a>`;
     }).join("");
   }
-  async function saveClip(a, w) {
-    const def = `${a.name} (clip)`;
+  async function saveClip(a, w, suggested) {
+    const def = suggested || `${a.name} (clip)`;
     const name = prompt("Name for the new activity:", def);
     if (name === null) return;
     try {
@@ -369,14 +373,18 @@
     } catch (e) { toast("Could not save: " + e.message); }
   }
 
-  async function renderActivity(id, win) {
+  async function renderActivity(id, win, opts = {}) {
     destroyCharts();
-    state.sel = null;
+    state.sel = null; state.lap = null; state.lapRange = null; state.onSelChange = null;
     main.innerHTML = `<div class="spinner">Analysing…</div>`;
-    let a;
-    try { a = await api(`/api/activities/${id}?split=${u().split}${windowQuery(win)}`); }
-    catch (e) { main.innerHTML = `<div class="welcome"><h1>Not found</h1><p class="muted">${esc(e.message)}</p><a href="#/">Back to dashboard</a></div>`; return; }
+    let a, laps = null;
+    try {
+      const lapsReq = opts.laps && win ? api(`/api/activities/${id}/laps`).catch(() => null) : null;
+      a = await api(`/api/activities/${id}?split=${u().split}${windowQuery(win)}`);
+      laps = await lapsReq;
+    } catch (e) { main.innerHTML = `<div class="welcome"><h1>Not found</h1><p class="muted">${esc(e.message)}</p><a href="#/">Back to dashboard</a></div>`; return; }
     state.current = a; renderList();
+    const lapsMode = !!(laps && a.window);
     const s = a.summary;
     const pace = PACE_SPORTS.has(a.sport);
     const sportOpts = ["running", "cycling", "walking", "hiking", "swimming", "unknown"];
@@ -413,9 +421,12 @@
           <button class="btn danger" id="del-btn">Delete</button>
         </div>
       </div>
+      ${a.laps && !lapsMode ? `<div class="lap-hint" role="status">
+        <div><span aria-hidden="true">🔁</span> <strong>Repeating laps detected</strong> — ${a.laps.count} × ${fmtDist(a.laps.lap_distance_m)} ${u().distL}</div>
+        <a class="btn small primary" href="${activityHash(a.id, a.laps, true)}">Analyze laps</a></div>` : ""}
       ${a.window ? `<div class="trim-banner" role="status">
-        <div><strong>Trimmed view</strong> — ${fmtDist(s.distance_m || 0)} ${u().distL}${s.elapsed_s != null ? ` · ${fmtDur(s.elapsed_s)}` : ""}
-          <span class="muted">(points ${a.window.start}–${a.window.end} of ${a.window.total_points}; temporary, the original is unchanged)</span></div>
+        <div><strong>${lapsMode ? `Laps view — ${laps.count} laps` : "Trimmed view"}</strong> — ${fmtDist(s.distance_m || 0)} ${u().distL}${s.elapsed_s != null ? ` · ${fmtDur(s.elapsed_s)}` : ""}
+          <span class="muted">(${lapsMode ? "warm-up and cool-down left out; " : `points ${a.window.start}–${a.window.end} of ${a.window.total_points}; `}temporary, the original is unchanged)</span></div>
         <div class="trim-actions">
           <span class="export-group"><span class="muted">Cut to new file</span>${exportLinks(a, a.window)}</span>
           <button class="btn small" id="clip-btn">Save as activity</button>
@@ -423,7 +434,17 @@
         </div></div>` : ""}
       <div class="tiles">${tiles}</div>
       <div class="stack">
-        ${a.track ? `<div class="card"><div id="map"></div></div>` : ""}
+        ${lapsMode ? `<div class="card"><h2><span>Summary</span><span class="muted" style="font-weight:400" id="lap-stats"></span></h2><div id="lap-compare"></div></div>` : ""}
+        ${lapsMode || a.track ? `<div class="${lapsMode && a.track ? "grid two" : "stack"}">
+          ${lapsMode ? `<div class="card"><h2><span>Lap times</span><span class="muted" style="font-weight:400">click a lap to select it</span></h2><div class="chart-wrap lap-chart-wrap"><canvas id="lap-chart"></canvas></div></div>` : ""}
+          ${a.track ? `<div class="map-slot"><div class="card map-card" id="map-card">
+            <div class="map-head">
+              <label class="ov-label">Colour track by <select id="ov-sel"></select></label>
+              <button class="btn small" id="map-size" aria-pressed="false" title="Enlarge map">⤢ Enlarge</button>
+            </div>
+            <div id="map"></div></div></div>` : ""}
+        </div>` : ""}
+        ${lapsMode ? `<div class="card"><h2><span>Laps</span><span class="muted" style="font-weight:400">click a row, then ↑/↓ to step through</span></h2><div class="table-scroll lap-list" id="lap-list"></div></div>` : ""}
         <div class="card" id="charts-card"><h2><span>Data streams</span>
           ${a.series.time_s ? `<span class="seg" role="group" aria-label="X axis"><button data-x="distance">Distance</button><button data-x="time">Time</button></span>` : ""}</h2>
           <div class="readout" id="readout"><span class="muted">Hover a chart to inspect values${a.track ? " and locate the point on the map" : ""}. Drag across a chart to select a section.</span></div>
@@ -456,7 +477,7 @@
       toast("Activity deleted"); await loadList(); location.hash = "#/";
     });
 
-    if (a.track) drawMap(a.track);
+    if (a.track) drawMap(a, lapsMode ? laps : null);
     let xMode = lsGet("xmode") === "time" && a.series.time_s ? "time" : "distance";
     if (!a.series.distance_m.at(-1)) xMode = a.series.time_s ? "time" : "distance";
     const setX = (mode) => {
@@ -467,20 +488,162 @@
     document.querySelectorAll("[data-x]").forEach((b) => b.addEventListener("click", () => setX(b.dataset.x)));
     setX(xMode);
     if (a.power_curve?.length) powerCurveChart($("#pc"), a.power_curve, false);
+    if (lapsMode) renderLaps(a, laps);
   }
 
-  function drawMap(track) {
+  // ------------------------------------------------------------------ map
+  function drawMap(a, laps) {
     if (map) { map.remove(); map = null; }
-    map = L.map("map", { scrollWheelZoom: false });
+    const track = a.track;
+    map = L.map("map", { scrollWheelZoom: false, preferCanvas: true });
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
       maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
     }).addTo(map);
-    const line = L.polyline(track, { color: css("--accent"), weight: 4, opacity: 0.9 }).addTo(map);
-    map.fitBounds(line.getBounds(), { padding: [20, 20] });
+    baseLine = L.polyline(track, { color: css("--accent"), weight: 4, opacity: 0.9, interactive: false }).addTo(map);
+    trackBounds = baseLine.getBounds();
+    map.fitBounds(trackBounds, { padding: [20, 20] });
+    overlayLayer = L.layerGroup().addTo(map);
     const dot = (latlng, color) => L.circleMarker(latlng, { radius: 6, color: css("--surface-1"), weight: 2, fillColor: color, fillOpacity: 1 }).addTo(map);
-    dot(track[0], css("--m-elevation")).bindTooltip("Start");
-    dot(track.at(-1), css("--text-primary")).bindTooltip("Finish");
-    hoverMarker = L.circleMarker(track[0], { radius: 7, color: css("--surface-1"), weight: 2, fillColor: css("--m-hr"), opacity: 0, fillOpacity: 0 }).addTo(map);
+    mapMarkers = [dot(track[0], css("--m-elevation")).bindTooltip("Start"), dot(track.at(-1), css("--text-primary")).bindTooltip("Finish")];
+    if (laps?.gate) {
+      mapMarkers.push(L.circleMarker(laps.gate, { radius: 7, color: css("--text-primary"), weight: 3, fillColor: css("--surface-1"), fillOpacity: 1 })
+        .addTo(map).bindTooltip("Lap start / finish"));
+    }
+    hoverMarker = L.circleMarker(track[0], { radius: 7, color: css("--surface-1"), weight: 2, fillColor: css("--m-hr"), opacity: 0, fillOpacity: 0, interactive: false }).addTo(map);
+    legendCtl = L.control({ position: "bottomleft" });
+    legendCtl.onAdd = () => { const d = L.DomUtil.create("div", "map-legend"); d.hidden = true; return d; };
+    legendCtl.addTo(map);
+
+    const defs = overlayDefs(a);
+    if (!defs.some((d) => d.key === state.overlay)) state.overlay = "none";
+    const sel = $("#ov-sel");
+    sel.innerHTML = `<option value="none">Nothing (route only)</option>` +
+      defs.map((d) => `<option value="${d.key}" ${d.key === state.overlay ? "selected" : ""}>${esc(d.label)}</option>`).join("");
+    sel.addEventListener("change", () => { state.overlay = sel.value; lsSet("overlay", sel.value); drawOverlay(a); });
+    $("#map-size").addEventListener("click", () => setMapExpanded(!$("#map-card").classList.contains("expanded")));
+    drawOverlay(a);
+  }
+
+  function setMapExpanded(on) {
+    const card = $("#map-card");
+    if (!card || !map) return;
+    const slot = card.parentElement;
+    slot.style.height = on ? `${card.offsetHeight}px` : ""; // keep the page from jumping
+    card.classList.toggle("expanded", on);
+    document.body.classList.toggle("map-open", on);
+    const b = $("#map-size");
+    b.setAttribute("aria-pressed", String(on));
+    b.textContent = on ? "⤡ Minimize" : "⤢ Enlarge";
+    b.title = on ? "Minimize map (Esc)" : "Enlarge map";
+    if (on) map.scrollWheelZoom.enable(); else map.scrollWheelZoom.disable();
+    map.invalidateSize({ animate: false });
+    map.fitBounds(selLine ? selLine.getBounds() : trackBounds, { padding: [30, 30] });
+  }
+
+  function quantile(sorted, q) {
+    if (!sorted.length) return null;
+    const p = (sorted.length - 1) * q, lo = Math.floor(p), hi = Math.ceil(p);
+    return sorted[lo] + (sorted[hi] - sorted[lo]) * (p - lo);
+  }
+
+  // Parameters that can colour the track. Values are per series point (same index as lat/lon).
+  function overlayDefs(a) {
+    const se = a.series, pace = PACE_SPORTS.has(a.sport), defs = [];
+    const moving = (v) => (v != null && v >= 0.3 ? v : null);
+    if (se.speed_ms && se.distance_m.at(-1) > 0) {
+      defs.push({ key: "speed", label: pace ? "Pace" : "Speed", values: se.speed_ms.map(moving),
+        fmt: (v) => (pace ? `${fmtPace(v)} /${u().distL}` : `${fmtSpeed(v)} ${u().speedL}`),
+        // pace numbers run opposite to speed, so "≤" would read backwards
+        ends: pace ? (lo, hi, f) => [`${f(lo)} or slower`, `${f(hi)} or faster`] : null });
+    }
+    if (se.elevation_m) defs.push({ key: "elevation", label: "Elevation", values: se.elevation_m, fmt: (v) => `${fmtEle(v)} ${u().eleL}` });
+    if (se.hr) defs.push({ key: "hr", label: "Heart rate", values: se.hr, fmt: (v) => `${fmtNum(v, 0)} bpm` });
+    if (se.power) defs.push({ key: "power", label: "Power", values: se.power, fmt: (v) => `${fmtNum(v, 0)} W` });
+    const avg = a.summary.avg_speed_ms;
+    if (se.speed_ms && avg) {
+      defs.push({ key: "delta", label: "Speed Δ vs average", diverging: true,
+        values: se.speed_ms.map((v) => (moving(v) == null ? null : v - avg)),
+        fmt: (v) => `${v > 0 ? "+" : v < 0 ? "−" : "±"}${fmtSpeed(Math.abs(v))} ${u().speedL}`,
+        note: `average ${pace ? `${fmtPace(avg)} /${u().distL}` : `${fmtSpeed(avg)} ${u().speedL}`}` });
+    }
+    return defs;
+  }
+
+  function drawOverlay(a) {
+    if (!map) return;
+    overlayLayer.clearLayers();
+    const def = overlayDefs(a).find((d) => d.key === state.overlay);
+    const legend = legendCtl.getContainer();
+    if (!def) {
+      baseLine.setStyle({ opacity: 0.9 });
+      legend.hidden = true;
+      raiseMapMarks();
+      return;
+    }
+    baseLine.setStyle({ opacity: 0 });
+    const steps = Array.from({ length: 7 }, (_, i) => css(`--${def.diverging ? "dv" : "ov"}-${i + 1}`));
+    const vals = def.values.filter((v) => v != null).sort((x, y) => x - y);
+    let lo, hi;
+    if (def.diverging) { // symmetric around 0 so the gray middle step means "average"
+      const lim = quantile(vals.map(Math.abs).sort((x, y) => x - y), 0.95) || 1;
+      lo = -lim; hi = lim;
+    } else {             // clip outliers (GPS spikes, stops) to the 5th–95th percentile
+      lo = quantile(vals, 0.05); hi = quantile(vals, 0.95);
+      if (!(hi - lo > 1e-9)) hi = lo + 1;
+    }
+    const bin = (v) => (v == null ? -1 : Math.max(0, Math.min(steps.length - 1, Math.floor(((v - lo) / (hi - lo)) * steps.length))));
+
+    // With a selection (e.g. one lap), only that part keeps full colour; the rest fades,
+    // so overlapping laps don't hide each other.
+    const sel = state.sel, inSel = (k) => !sel || (k >= sel.i0 && k <= sel.i1);
+    const se = a.series, pts = [];
+    for (let k = 0; k < se.lat.length; k++) {
+      if (se.lat[k] != null && se.lon[k] != null) pts.push({ ll: [se.lat[k], se.lon[k]], b: bin(def.values[k]), on: inSel(k) });
+    }
+    const drawRuns = (subset, weight, opacity, casing) => {
+      for (const part of subset) {
+        if (part.length < 2) continue;
+        if (casing) L.polyline(part.map((p) => p.ll), { color: css("--map-casing"), weight: weight + 3.5, opacity, interactive: false }).addTo(overlayLayer);
+        let run = [part[0].ll], cur = part[0].b;
+        const flush = () => L.polyline(run, { color: cur < 0 ? css("--text-muted") : steps[cur], weight, opacity, lineJoin: "round", interactive: false }).addTo(overlayLayer);
+        for (let k = 1; k < part.length; k++) {
+          run.push(part[k].ll);
+          if (part[k].b !== cur || k === part.length - 1) { flush(); run = [part[k].ll]; cur = part[k].b; }
+        }
+      }
+    };
+    const split = (on) => { // contiguous stretches inside / outside the selection (joined at the edges)
+      const parts = [];
+      let cur = null;
+      for (let k = 0; k < pts.length; k++) {
+        if (pts[k].on === on) { cur ||= k > 0 ? [pts[k - 1]] : []; cur.push(pts[k]); }
+        else if (cur) { cur.push(pts[k]); parts.push(cur); cur = null; }
+      }
+      if (cur) parts.push(cur);
+      return parts;
+    };
+    if (sel) drawRuns(split(false), 3, 0.25, false);
+    // Casing under the coloured line keeps pale steps visible on any map tile.
+    drawRuns(sel ? split(true) : [pts], 4.5, 1, true);
+    const [loTxt, hiTxt] = def.ends ? def.ends(lo, hi, def.fmt)
+      : def.diverging ? [`slower ${def.fmt(lo)}`, `faster ${def.fmt(hi)}`]
+      : [`≤ ${def.fmt(lo)}`, `≥ ${def.fmt(hi)}`];
+    legend.hidden = false;
+    legend.innerHTML = `<div class="lg-title">${esc(def.label)}${def.note ? ` <span class="muted">(${esc(def.note)})</span>` : ""}</div>
+      <div class="lg-ramp">${steps.map((c) => `<span style="background:${c}"></span>`).join("")}</div>
+      <div class="lg-labels"><span>${esc(loTxt)}</span>${def.diverging ? "<span>avg</span>" : ""}<span>${esc(hiTxt)}</span></div>
+      ${sel ? `<div class="muted lg-note">Colour shows the selection; the rest is faded.</div>` : ""}`;
+    raiseMapMarks();
+  }
+
+  // Keep markers above the track; with an overlay, the selection becomes a halo underneath.
+  function raiseMapMarks() {
+    if (selLine) {
+      if (state.overlay !== "none" && overlayLayer.getLayers().length) selLine.setStyle({ weight: 16, opacity: 0.55 }).bringToBack();
+      else selLine.setStyle({ weight: 6, opacity: 0.95 }).bringToFront();
+    }
+    mapMarkers.forEach((m) => m.bringToFront());
+    hoverMarker?.bringToFront();
   }
 
   function streamDefs(a) {
@@ -534,6 +697,7 @@
         options: {
           responsive: true, maintainAspectRatio: false, animation: false, parsing: false, normalized: true,
           events: [], // hover is handled by our own sync listeners
+          layout: { padding: { right: 12 } }, // same plot width on every chart (last one has x labels)
           plugins: { legend: { display: false }, tooltip: { enabled: false } },
           scales,
         },
@@ -572,16 +736,27 @@
 
   window.addEventListener("mouseup", () => { if (state.drag) state.onDragEnd?.(); });
   window.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && state.sel && state.current) { state.sel = null; renderSelection(state.current); }
+    if (e.key !== "Escape") return;
+    if ($("#map-card.expanded")) { setMapExpanded(false); return; }
+    if (state.sel && state.current) { state.sel = null; renderSelection(state.current); }
   });
 
   function renderSelection(a) {
+    const sel = state.sel;
+    // A drag or Clear replaces a selected lap.
+    if (state.lap && !(sel && state.lapRange && sel.i0 === state.lapRange.i0 && sel.i1 === state.lapRange.i1)) {
+      state.lap = null; state.lapRange = null;
+    }
+    try { drawSelection(a, sel); } finally { state.onSelChange?.(); }
+  }
+
+  function drawSelection(a, sel) {
     state.charts.filter((c) => c.$synced).forEach((c) => c.draw());
     const bar = $("#sel-bar");
     if (!bar) return;
     const se = a.series;
     if (selLine) { selLine.remove(); selLine = null; }
-    const sel = state.sel;
+    if (state.overlay !== "none" && map) drawOverlay(a); // re-fade around the new selection
     if (!sel || se.idx[sel.i1] - se.idx[sel.i0] < 1) { bar.hidden = true; bar.innerHTML = ""; return; }
     const w = { start: se.idx[sel.i0], end: se.idx[sel.i1] };
     const dist = se.distance_m[sel.i1] - se.distance_m[sel.i0];
@@ -589,21 +764,22 @@
     const from = se.time_s ? fmtDur(se.time_s[sel.i0]) : `${fmtDist(se.distance_m[sel.i0])} ${u().distL}`;
     const to = se.time_s ? fmtDur(se.time_s[sel.i1]) : `${fmtDist(se.distance_m[sel.i1])} ${u().distL}`;
     bar.hidden = false;
-    bar.innerHTML = `<div><strong>Selection</strong> ${fmtDist(dist)} ${u().distL}${dur != null ? ` · ${fmtDur(dur)}` : ""}
+    bar.innerHTML = `<div><strong>${state.lap ? `Lap ${state.lap}` : "Selection"}</strong> ${fmtDist(dist)} ${u().distL}${dur != null ? ` · ${fmtDur(dur)}` : ""}
         <span class="muted">(${from} → ${to})</span></div>
       <div class="trim-actions">
-        <a class="btn small primary" href="${activityHash(a.id, w)}">View selection</a>
+        <a class="btn small primary" href="${activityHash(a.id, w)}">View ${state.lap ? "lap" : "selection"}</a>
         <span class="export-group"><span class="muted">Cut to new file</span>${exportLinks(a, w)}</span>
         <button class="btn small" id="sel-save">Save as activity</button>
         <button class="btn small ghost" id="sel-clear" title="Clear selection (Esc)">Clear</button>
       </div>`;
-    $("#sel-save").addEventListener("click", () => saveClip(a, w));
+    const lapName = state.lap ? `${a.name} – lap ${state.lap}` : undefined;
+    $("#sel-save").addEventListener("click", () => saveClip(a, w, lapName));
     $("#sel-clear").addEventListener("click", () => { state.sel = null; renderSelection(a); });
     if (map && se.lat) {
       const pts = [];
       for (let k = sel.i0; k <= sel.i1; k++) if (se.lat[k] != null && se.lon[k] != null) pts.push([se.lat[k], se.lon[k]]);
-      if (pts.length > 1) selLine = L.polyline(pts, { color: css("--sel-edge"), weight: 6, opacity: 0.95 }).addTo(map);
-      hoverMarker?.bringToFront();
+      if (pts.length > 1) selLine = L.polyline(pts, { color: css("--sel-edge"), weight: 6, opacity: 0.95, interactive: false }).addTo(map);
+      raiseMapMarks();
     }
   }
 
@@ -639,6 +815,140 @@
     }
   }
 
+  // ------------------------------------------------------------------ laps view
+  function renderLaps(a, r) {
+    const pace = PACE_SPORTS.has(a.sport);
+    const laps = r.laps, st = r.lap_time_stats;
+    const withUnit = (v, f, unit) => (v == null ? "–" : `${f(v)}${unit ? " " + unit : ""}`);
+    const speedTxt = (ms) => (ms == null ? "–" : pace ? `${fmtPace(ms)} /${u().distL}` : `${fmtSpeed(ms)} ${u().speedL}`);
+    const signed = (s) => (s == null ? "–" : `${s > 0 ? "+" : s < 0 ? "−" : "±"}${fmtNum(Math.abs(s), 1)} s`);
+
+    if (st) {
+      $("#lap-stats").textContent = `${laps.length} × ${fmtDist(r.lap_distance_m)} ${u().distL} · avg ${fmtDur(st.mean_s)} · spread ±${fmtNum(st.stdev_s, 1)} s`;
+    }
+
+    // "Average lap": mean of the per-lap values; speed from summed distance / summed moving time.
+    const mean = (k) => { const v = laps.map((l) => l[k]).filter((x) => x != null); return v.length ? v.reduce((s, x) => s + x, 0) / v.length : null; };
+    const avgLap = Object.fromEntries(["distance_m", "elapsed_s", "moving_s", "elev_gain_m", "avg_hr", "max_hr", "avg_power", "avg_cadence"].map((k) => [k, mean(k)]));
+    const sumMov = laps.reduce((s, l) => s + (l.moving_s || 0), 0);
+    avgLap.avg_speed_ms = sumMov ? laps.reduce((s, l) => s + (l.distance_m || 0), 0) / sumMov : null;
+    const fastest = st ? laps[st.best_index - 1] : null;
+
+    const rows = [
+      ["Distance", (c) => withUnit(c.distance_m, (v) => fmtDist(v), u().distL), "distance_m"],
+      ["Time", (c) => fmtDur(c.elapsed_s), "elapsed_s"],
+      ["Moving time", (c) => fmtDur(c.moving_s), "moving_s"],
+      [pace ? "Avg pace (moving)" : "Avg speed (moving)", (c) => speedTxt(c.avg_speed_ms), "avg_speed_ms"],
+      ["Elevation gain", (c) => withUnit(c.elev_gain_m, fmtEle, u().eleL), "elev_gain_m"],
+      ["Avg heart rate", (c) => withUnit(c.avg_hr, (v) => fmtNum(v, 0), "bpm"), "avg_hr"],
+      ["Max heart rate", (c) => withUnit(c.max_hr, (v) => fmtNum(v, 0), "bpm"), "max_hr"],
+      ["Avg power", (c) => withUnit(c.avg_power, (v) => fmtNum(v, 0), "W"), "avg_power"],
+      ["Avg cadence", (c) => withUnit(c.avg_cadence, (v) => fmtNum(v, 0), a.sport === "cycling" ? "rpm" : "spm"), "avg_cadence"],
+    ].filter(([, , k]) => r.whole[k] != null || r.section[k] != null);
+
+    const renderCompare = () => {
+      const sel = state.lap ? laps[state.lap - 1] : null;
+      const cols = [
+        ["Whole activity", r.whole], ["All laps", r.section], ["Average lap", avgLap],
+        [fastest ? `Fastest (lap ${fastest.index})` : "Fastest lap", fastest],
+        [sel ? `Lap ${sel.index}` : "Selected lap", sel],
+      ];
+      $("#lap-compare").innerHTML = `<div class="table-scroll"><table class="cmp"><thead><tr><th></th>${cols.map(([h], i) => `<th class="${i === 4 ? "sel-col" : ""}">${esc(h)}</th>`).join("")}</tr></thead><tbody>
+        ${rows.map(([label, f]) => `<tr><th scope="row">${esc(label)}</th>${cols.map(([, c], i) => `<td class="${i === 4 ? "sel-col" : ""}">${c ? f(c) : '<span class="muted">–</span>'}</td>`).join("")}</tr>`).join("")}
+        </tbody></table></div>${state.lap ? "" : `<p class="muted small-note">Select a lap in the list or the chart to compare it.</p>`}`;
+    };
+
+    const has = (k) => laps.some((l) => l[k] != null);
+    const cols = [
+      ["Lap", (l) => `${l.index}`],
+      ["Time", (l) => fmtDur(l.elapsed_s)],
+      ["Δ avg", (l) => signed(l.delta_s)],
+      [pace ? "Pace" : "Speed", (l) => speedTxt(l.lap_speed_ms)],
+      ["Distance", (l) => withUnit(l.distance_m, (v) => fmtDist(v), u().distL)],
+      ...(has("avg_hr") ? [["Avg HR", (l) => fmtNum(l.avg_hr, 0)], ["Max HR", (l) => fmtNum(l.max_hr, 0)]] : []),
+      ...(has("avg_power") ? [["Power", (l) => fmtNum(l.avg_power, 0)]] : []),
+      ...(has("avg_cadence") ? [["Cadence", (l) => fmtNum(l.avg_cadence, 0)]] : []),
+      ...(has("elev_gain_m") ? [["Elev +", (l) => fmtEle(l.elev_gain_m)]] : []),
+      ["", (l) => (st && l.index === st.best_index ? '<span class="badge">fastest</span>' : st && l.index === st.worst_index ? '<span class="badge muted">slowest</span>' : "")],
+    ];
+    const list = $("#lap-list");
+    list.innerHTML = `<table><thead><tr>${cols.map(([h]) => `<th>${esc(h)}</th>`).join("")}</tr></thead><tbody>
+      ${laps.map((l) => `<tr data-lap="${l.index}" tabindex="0" aria-selected="false">${cols.map(([, f]) => `<td>${f(l)}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
+    list.addEventListener("click", (e) => { const tr = e.target.closest("tr[data-lap]"); if (tr) selectLap(Number(tr.dataset.lap)); });
+    list.addEventListener("keydown", (e) => {
+      const tr = e.target.closest("tr[data-lap]");
+      if (!tr) return;
+      const k = Number(tr.dataset.lap);
+      const next = e.key === "ArrowDown" ? k + 1 : e.key === "ArrowUp" ? k - 1 : (e.key === "Enter" || e.key === " ") ? k : null;
+      if (next == null || next < 1 || next > laps.length) return;
+      e.preventDefault();
+      selectLap(next);
+      list.querySelector(`tr[data-lap="${next}"]`).focus();
+    });
+
+    // Lap-time chart: dots (not bars: a zero baseline would hide the differences) + average line.
+    const ink = css("--m-speed"), selC = css("--sel-edge");
+    const avgLine = {
+      id: "avgLine",
+      afterDatasetsDraw(chart) {
+        if (!st) return;
+        const { ctx, chartArea, scales } = chart;
+        const y = scales.y.getPixelForValue(st.mean_s);
+        ctx.save();
+        ctx.strokeStyle = css("--text-muted"); ctx.setLineDash([4, 4]); ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(chartArea.left, y); ctx.lineTo(chartArea.right, y); ctx.stroke();
+        ctx.setLineDash([]); ctx.fillStyle = css("--text-muted"); ctx.font = "11px system-ui, sans-serif"; ctx.textAlign = "right";
+        ctx.fillText(`avg ${fmtDur(st.mean_s)}`, chartArea.right, y - 4);
+        ctx.restore();
+      },
+    };
+    const lapChart = new Chart($("#lap-chart"), {
+      type: "line",
+      data: { labels: laps.map((l) => l.index), datasets: [{ data: laps.map((l) => l.elapsed_s), borderColor: ink, borderWidth: 2, tension: 0,
+        pointRadius: 4, pointHoverRadius: 7, pointBackgroundColor: ink, pointBorderColor: css("--surface-1"), pointBorderWidth: 2, pointHitRadius: 12 }] },
+      options: {
+        responsive: true, maintainAspectRatio: false, animation: false,
+        interaction: { mode: "index", intersect: false },
+        plugins: { legend: { display: false }, tooltip: tooltipStyle({ callbacks: {
+          title: (it) => `Lap ${laps[it[0].dataIndex].index}`,
+          label: (it) => { const l = laps[it.dataIndex]; return [`${fmtDur(l.elapsed_s)} (${signed(l.delta_s)} vs avg)`, speedTxt(l.lap_speed_ms), ...(l.avg_hr ? [`${fmtNum(l.avg_hr, 0)} bpm avg`] : [])]; },
+        } }) },
+        scales: {
+          x: { ...baseScales("Lap").x, type: "category", grid: { display: false } },
+          y: { ...baseScales().y, grace: "10%", ticks: { ...baseScales().y.ticks, callback: (v) => fmtDur(v) } },
+        },
+        onHover: (evt, els) => { evt.native.target.style.cursor = els.length ? "pointer" : "default"; },
+        onClick: (evt) => {
+          const el = lapChart.getElementsAtEventForMode(evt, "index", { intersect: false }, false)[0];
+          if (el) selectLap(laps[el.index].index);
+        },
+      },
+      plugins: [avgLine],
+    });
+    state.charts.push(lapChart);
+
+    const refresh = () => {
+      list.querySelectorAll("tr[data-lap]").forEach((tr) => tr.setAttribute("aria-selected", String(Number(tr.dataset.lap) === state.lap)));
+      const ds = lapChart.data.datasets[0];
+      ds.pointBackgroundColor = laps.map((l) => (l.index === state.lap ? selC : ink));
+      ds.pointRadius = laps.map((l) => (l.index === state.lap ? 7 : 4));
+      lapChart.update("none");
+      renderCompare();
+    };
+    function selectLap(k) {
+      if (k === state.lap) { state.sel = null; renderSelection(a); return; } // click again to deselect
+      const lap = laps[k - 1];
+      const idx = a.series.idx;
+      state.sel = { i0: nearestIdx(idx, lap.start), i1: nearestIdx(idx, lap.end) };
+      state.lap = k; state.lapRange = { ...state.sel };
+      renderSelection(a);
+      const row = list.querySelector(`tr[data-lap="${k}"]`);
+      row?.scrollIntoView({ block: "nearest" });
+    }
+    state.onSelChange = refresh;
+    refresh();
+  }
+
   function zonesHtml(zones) {
     const total = zones.reduce((s, z) => s + z.time_s, 0) || 1;
     const max = Math.max(...zones.map((z) => z.time_s), 1);
@@ -669,13 +979,14 @@
 
   // ------------------------------------------------------------------ router
   function route() {
-    const m = location.hash.match(/^#\/activity\/(\d+)(?:\?(.*))?$/);
+    document.body.classList.remove("map-open");
+    const m =location.hash.match(/^#\/activity\/(\d+)(?:\?(.*))?$/);
     if (!m) { renderDashboard(); return; }
     const q = new URLSearchParams(m[2] || "");
     const start = Number(q.get("start")), end = Number(q.get("end"));
     const win = q.has("start") && q.has("end") && Number.isInteger(start) && Number.isInteger(end) && end > start
       ? { start, end } : null;
-    renderActivity(Number(m[1]), win);
+    renderActivity(Number(m[1]), win, { laps: q.get("laps") === "1" });
   }
   window.addEventListener("hashchange", route);
   loadList().then(route).catch((e) => { main.innerHTML = `<div class="welcome"><h1>Cannot reach the server</h1><p class="muted">${esc(e.message)}</p></div>`; });

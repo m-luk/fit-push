@@ -32,6 +32,69 @@ def synthetic_track(seconds=1800, speed=3.0, pause=(600, 660), start=START, with
     return pts
 
 
+def _stadium(s, straight=100.0):
+    """(x, y) metres on a 400 m running track at arc length ``s`` (counter-clockwise)."""
+    r = (400.0 - 2 * straight) / (2 * math.pi)
+    s %= 400.0
+    if s < straight:
+        return s, -r
+    s -= straight
+    if s < math.pi * r:
+        a = -math.pi / 2 + s / r
+        return straight + r * math.cos(a), r * math.sin(a)
+    s -= math.pi * r
+    if s < straight:
+        return straight - s, r
+    a = math.pi / 2 + (s - straight) / r
+    return r * math.cos(a), r * math.sin(a)
+
+
+def lap_track(laps=8, warmup=600.0, cooldown=400.0, lap_speeds=None, noise=2.5, seed=7, start=START):
+    """Warm-up along a road, ``laps`` x 400 m on a running track, then a cool-down.
+
+    ``lap_speeds`` (m/s per lap) defaults to a gently varying 4.0-4.4 m/s.
+    """
+    import random
+    rnd = random.Random(seed)
+    lap_speeds = lap_speeds or [4.2 + 0.2 * math.sin(k) for k in range(laps)]
+    gate = _stadium(0.0)
+
+    def pos(dist):
+        if dist < warmup:  # approach the gate from the west
+            return gate[0] - (warmup - dist), gate[1] - 0.3 * (warmup - dist)
+        on_track = dist - warmup
+        if on_track < 400.0 * laps:
+            return _stadium(on_track)
+        off = on_track - 400.0 * laps  # leave to the south
+        return gate[0], gate[1] - off
+
+    pts, dist, i = [], 0.0, 0
+    total = warmup + 400.0 * laps + cooldown
+    # GPS error drifts slowly (AR(1)), it is not independent per fix.
+    rho, nx, ny = 0.97, 0.0, 0.0
+    kick = noise * math.sqrt(1 - rho * rho)
+    while dist <= total:
+        lap = int((dist - warmup) // 400) if warmup <= dist < warmup + 400 * laps else None
+        speed = lap_speeds[lap] if lap is not None else 3.0
+        x, y = pos(dist)
+        nx, ny = rho * nx + rnd.gauss(0, kick), rho * ny + rnd.gauss(0, kick)
+        x += nx
+        y += ny
+        pts.append({
+            "t": start + timedelta(seconds=i),
+            "lat": LAT0 + y / M_PER_DEG_LAT,
+            "lon": LON0 + x / (M_PER_DEG_LAT * math.cos(math.radians(LAT0))),
+            "ele": 100.0,
+            "hr": 130 + (20 if lap is not None else 0) + 0.01 * i,
+            "cad": 88,
+            "power": None,
+            "dist": dist,
+        })
+        dist += speed
+        i += 1
+    return pts
+
+
 def to_gpx(pts, name="Morning Run", sport="running") -> bytes:
     rows = []
     for p in pts:

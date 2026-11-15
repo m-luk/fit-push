@@ -45,6 +45,41 @@ every chart and on the map. From the selection bar you can:
 
 The full activity can also be exported in any of the three formats.
 
+### Laps
+
+When a track obviously repeats (a running track, a criterium circuit, a loop
+ridden twice), the activity page shows **Repeating laps detected** with an
+**Analyze laps** button. Detection works on GPS alone, so it doesn't depend on
+the device's lap button or auto-lap settings:
+
+- candidate "gates" along the track are tested; for each, every pass through it
+  (always in the same direction) is found;
+- consecutive laps must agree in length (within 12 %) and in shape (laps are
+  resampled and compared with the median lap);
+- the gate explaining the longest run of such laps wins, so warm-up before the
+  first lap and cool-down after the last are left out.
+
+The laps view is a temporary trimmed view from the first lap's start to the
+last lap's end. It adds:
+
+- **Summary** comparing the whole activity, all laps, the average lap, the
+  fastest lap and the selected lap;
+- **Lap times** chart with the average marked (click a dot to select that lap);
+- **Laps** table with time, difference from the average, pace or speed, HR,
+  power, cadence and climbing. Click a row or use the ↑/↓ keys. The selected lap
+  is highlighted on the charts and the map, and can be viewed, cut to a file or
+  saved like any other selection.
+
+### Map
+
+- **Enlarge / Minimize** switches the map between its card and a near
+  full-screen view (Esc minimizes).
+- **Colour track by** speed or pace, elevation, heart rate, power, or
+  **speed Δ vs average** (blue = slower, gray = about average, red = faster). The
+  scale is clipped to the 5th–95th percentile so a GPS spike can't flatten it,
+  and a legend shows the range. With a section or lap selected, only that part
+  stays coloured and the rest fades, so overlapping laps can be compared.
+
 Across activities: totals, weekly or monthly trend charts (distance, time,
 elevation, training load, count), personal records per sport, and an all-time
 power curve.
@@ -92,6 +127,7 @@ once, and duplicate files are skipped by content hash.
 | `GET` | `/api/activities/{id}?start=&end=` | temporary trimmed view (point indices, inclusive; nothing is saved) |
 | `GET` | `/api/activities/{id}/export?format=gpx\|tcx\|fit&start=&end=` | download full activity or trimmed section as a new file |
 | `POST` | `/api/activities/{id}/clip` | `{start, end, name?}`: save section as new activity |
+| `GET` | `/api/activities/{id}/laps` | detected laps with per-lap, lapped-section and whole-activity summaries (404 if none) |
 | `PATCH` | `/api/activities/{id}` | `{name, sport}` |
 | `DELETE` | `/api/activities/{id}` | delete |
 | `GET` | `/api/stats?sport=&period=week\|month` | totals, periods, records, all-time power curve |
@@ -116,6 +152,7 @@ app/
   parsers.py    FIT / GPX / TCX (+gzip) -> Activity(points)
   analytics.py  numpy-based metrics, splits, zones, power curve, best efforts
   writers.py    GPX / TCX / FIT writers (export, cut to new file)
+  laps.py       repeating-lap detection and per-lap summaries
   storage.py    SQLite (zlib-compressed point columns)
   main.py       FastAPI routes + static frontend
   static/       index.html, app.js (Chart.js + Leaflet), style.css

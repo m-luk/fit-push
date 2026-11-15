@@ -17,6 +17,7 @@ from pydantic import BaseModel, Field
 
 from . import writers
 from .analytics import activity_to_columns, analyse, cumulative_distance, point_count, window_columns
+from .laps import detect_laps, lap_report
 from .parsers import ParseError, normalise_sport, parse_file
 from .storage import Store
 
@@ -62,6 +63,17 @@ def create_app(db_path: str | None = None) -> FastAPI:
 
     def _analyse_row(row: dict, split_m: float = 1000.0) -> dict:
         return analyse(row["points"], row["sport"], store.get_settings(), split_m)
+
+    # Lap detection depends only on the (immutable) points, so cache it per activity.
+    lap_cache: dict[tuple[int, str], dict | None] = {}
+
+    def _detect(row: dict) -> dict | None:
+        key = (row["id"], row["sha256"])
+        if key not in lap_cache:
+            if len(lap_cache) > 256:
+                lap_cache.clear()
+            lap_cache[key] = detect_laps(row["points"])
+        return lap_cache[key]
 
     # ------------------------------------------------------------------ activities
     @app.post("/api/activities")
@@ -126,9 +138,20 @@ def create_app(db_path: str | None = None) -> FastAPI:
             offset = window["start"]
             result["series"]["idx"] = [i + offset for i in result["series"]["idx"]]
             result["window"] = window
+        det = _detect(row)
+        result["laps"] = None if det is None else {k: det[k] for k in ("count", "start", "end", "lap_distance_m")}
         meta = {k: row[k] for k in ("id", "filename", "source_format", "device", "name", "sport",
                                     "start_time", "created_at")}
         return {**meta, **result}
+
+    @app.get("/api/activities/{activity_id}/laps")
+    def get_laps(activity_id: int):
+        """Detected repeating laps with per-lap summaries (404 when the track has none)."""
+        row = _get_row(activity_id)
+        det = _detect(row)
+        if det is None:
+            raise HTTPException(404, "no repeating laps detected")
+        return lap_report(row["points"], row["sport"], store.get_settings(), det)
 
     @app.get("/api/activities/{activity_id}/export")
     def export_activity(activity_id: int, format: str = Query("gpx", pattern="^(gpx|tcx|fit)$"),
@@ -258,6 +281,15 @@ def create_app(db_path: str | None = None) -> FastAPI:
         }
 
     # ------------------------------------------------------------------ frontend
+    @app.middleware("http")
+    async def revalidate_frontend(request, call_next):
+        # Make browsers re-check (ETag) the page and its JS/CSS on every load, so a
+        # new version is picked up without a hard refresh.
+        response = await call_next(request)
+        if request.url.path == "/" or request.url.path.startswith("/static/"):
+            response.headers["Cache-Control"] = "no-cache"
+        return response
+
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
     @app.get("/", include_in_schema=False)
