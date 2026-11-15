@@ -9,6 +9,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
+from .. import __version__
 from ..core import Core
 from . import get_core
 
@@ -20,6 +21,12 @@ class SettingsIn(BaseModel):
     max_hr: int | None = Field(default=None, ge=100, le=250)
     rest_hr: int | None = Field(default=None, ge=25, le=120)
     ftp: int | None = Field(default=None, ge=50, le=600)
+
+
+@router.get("/version")
+def version():
+    """Identifies a running fit-push (the desktop launcher uses it to find an open instance)."""
+    return {"app": "fit-push", "version": __version__}
 
 
 @router.get("/sports")

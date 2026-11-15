@@ -38,10 +38,11 @@ python scripts/modules.py docs           # regenerate modules/INDEX.md + docs/MO
 ruff check . && ruff format --check .    # lint + format (config in pyproject.toml)
 ty check                                 # type check
 node --check app/static/app.js           # JS syntax
+python scripts/release.py build          # desktop app into dist/ (needs requirements-release.txt)
 ```
 
 VS Code tasks: **run** (Ctrl+Shift+B), **run (auto-reload)**, **run (core only)**,
-**tests**, **lint + types**. They are `process` tasks that start Python directly;
+**tests**, **lint + types**, **build desktop app**. They are `process` tasks that start Python directly;
 keep them that way (shell tasks broke under cmd / Git Bash).
 
 **After changing Python code, restart the server** (or run it with `--reload`).
@@ -77,6 +78,21 @@ Every `python -m app` start first copies the database to `<data dir>/backups/`
 `--list-backups` and `--restore latest|<file>` put one back, saving the current
 database as a `pre-restore` copy first. Never weaken this safety net.
 
+## Desktop app and releases
+
+`scripts/release.py build` freezes the app with PyInstaller (Python bundled) into `dist/`:
+a single-file executable, a portable folder and, on Windows, an Inno Setup installer.
+Pushing a tag `vX.Y.Z` builds and publishes releases on GitHub and GitLab; the tag must
+match `__version__` in `app/__init__.py` (and `pyproject.toml`): use
+`release.py bump X.Y.Z`. Details in `docs/DEVELOPMENT.md`.
+
+- Code must keep working **frozen**: find bundled files relative to `__file__` (as
+  `app/main.py` and `app/modules.py` do), never relative to the working directory or the
+  repo; new data folders need an `--add-data` in `release.py`, new dynamically imported
+  packages a `--collect-submodules`.
+- The launcher (`app/__main__.py`) uses `GET /api/version` to detect a running instance;
+  keep that endpoint stable.
+
 ## Layout
 
 ```
@@ -100,7 +116,8 @@ tests/
   core/           core tests by area;  helpers.py, samples.py (synthetic data)
   test_module_contract.py   rules for every module + isolation guarantees
 conftest.py       fixtures: client (core-only AND all modules), make_client(modules=...)
-scripts/          run.py (launcher), modules.py (new/check/docs/list)
+scripts/          run.py (launcher), modules.py (new/check/docs/list), release.py (build/release)
+packaging/        launcher.py (desktop entry point), installer.iss (Inno Setup), make_icon.py
 .claude/skills/   ui-development, ui-verify, module-development
 ```
 

@@ -1,0 +1,4 @@
+# Packaging the desktop app: python scripts/release.py build
+-r requirements.txt
+pyinstaller>=6.10
+pillow>=10.4

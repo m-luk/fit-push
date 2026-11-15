@@ -25,6 +25,7 @@ Interactive documentation is served at `/docs` while the app runs.
 | `GET` | `/api/stats?sport=&period=week\|month` | totals, periods, records, all-time power curve |
 | `GET/PUT` | `/api/settings` | `{max_hr, rest_hr, ftp}` |
 | `GET` | `/api/sports` | sport catalogue |
+| `GET` | `/api/version` | `{app: "fit-push", version}` (identifies a running instance) |
 | `GET` | `/api/modules` | modules with owner, status and errors |
 | `GET` | `/api/modules/{id}/docs/readme\|manual` | a module's intent / manual (Markdown) |
 | `*` | `/api/m/{module id}/...` | module APIs (see each module's README) |

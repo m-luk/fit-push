@@ -40,6 +40,48 @@ plus a headless-browser UI smoke test. Conventions for contributors and AI agent
 are in [AGENTS.md](../AGENTS.md). `tests/samples.py` generates synthetic GPX, TCX and
 binary FIT files, so the tests need no fixture files.
 
+## Desktop app and releases
+
+The desktop app is the normal app frozen with [PyInstaller](https://pyinstaller.org) (Python
+included), started by `packaging/launcher.py`, which runs `python -m app` with desktop
+defaults: open the browser, reuse a running instance (`GET /api/version`), fall back to a
+free port when 8000 is taken, keep the window open on a start-up error.
+
+```bash
+pip install -r requirements-release.txt   # PyInstaller + Pillow (for the icon)
+python scripts/release.py build           # dist/ for this OS, see below
+python scripts/release.py version         # 0.2.0 (app/__init__.py; pyproject.toml must match)
+python scripts/release.py bump 0.3.0      # set the version in both places
+python scripts/release.py notes           # release notes from the commits since the last tag
+```
+
+`build` writes to `dist/`:
+
+| OS | Files |
+|---|---|
+| Windows | `fit-push-<v>-windows-x64.exe` (single file), `...-setup.exe` (Inno Setup installer, per user, no admin), `...-windows-x64.zip` (portable folder) |
+| Linux, macOS | `fit-push-<v>-<os>-<arch>` (single file), `....tar.gz` (portable folder) |
+
+plus `SHA256SUMS.txt`. The installer needs [Inno Setup 6](https://jrsoftware.org/isinfo.php)
+(`winget install JRSoftware.InnoSetup`); without it the installer is skipped with a warning
+(`--require-installer` makes that an error). The icon is drawn from the logo by
+`packaging/make_icon.py`; the installer script is `packaging/installer.iss`. Shipped modules
+are bundled without their tests; `FITPUSH_MODULES_DIR` still points the app elsewhere.
+
+### Making a release
+
+1. `python scripts/release.py bump X.Y.Z`, commit (`Release X.Y.Z`).
+2. `git tag vX.Y.Z && git push --follow-tags`.
+3. CI builds and publishes:
+   - **GitHub** (`.github/workflows/release.yml`): checks the tag against the version, runs
+     the tests, builds on Windows, Linux (Ubuntu 22.04, for an older glibc) and macOS,
+     smoke-tests each single-file build and creates the GitHub release with the files and
+     checksums. It can be re-run for an existing tag from the Actions tab.
+   - **GitLab** (`build-linux`, `build-windows`, `release` jobs in `.gitlab-ci.yml`, tags
+     only): builds Linux and Windows (SaaS Windows runner), uploads the files to the generic
+     package registry and creates the release (`release.py publish-gitlab`). GitLab macOS
+     runners need a paid plan, so macOS builds come from GitHub.
+
 ## Layout
 
 ```

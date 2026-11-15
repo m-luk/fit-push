@@ -53,6 +53,17 @@
             "args": ["-c", "import subprocess, sys; sys.exit(max(subprocess.call(c) for c in ([sys.executable, \"-m\", \"ruff\", \"check\", \".\"], [sys.executable, \"-m\", \"ruff\", \"format\", \"--check\", \".\"], [sys.executable, \"-m\", \"ty\", \"check\"], [sys.executable, \"scripts/modules.py\", \"check\"])))"],
             "options": { "cwd": "${workspaceFolder}" },
             "problemMatcher": []
+        },
+        {
+            "label": "fit-push: build desktop app",
+            "detail": "PyInstaller single-file app, portable folder and (Windows, with Inno Setup) installer into dist/",
+            "type": "process",
+            "command": "${workspaceFolder}/.venv/bin/python",
+            "windows": { "command": "${workspaceFolder}\\.venv\\Scripts\\python.exe" },
+            "args": ["-c", "import subprocess, sys; subprocess.check_call([sys.executable, \"-m\", \"pip\", \"install\", \"-q\", \"-r\", \"requirements-release.txt\"]); sys.exit(subprocess.call([sys.executable, \"scripts/release.py\", \"build\"]))"],
+            "options": { "cwd": "${workspaceFolder}" },
+            "problemMatcher": [],
+            "presentation": { "reveal": "always", "panel": "dedicated" }
         }
     ]
 }

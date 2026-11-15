@@ -34,6 +34,23 @@ sailing, kayaking and swimming.
 
 ## Get started
 
+### Download (Windows, macOS, Linux)
+
+Get the latest release from the project's **Releases** page. Python is included; there is
+nothing else to install.
+
+- **Windows:** run `fit-push-<version>-windows-x64-setup.exe` to install it with a
+  Start-menu entry (no admin rights needed), or just double-click
+  `fit-push-<version>-windows-x64.exe` to run it without installing.
+- **macOS / Linux:** download `fit-push-<version>-<system>`, make it executable
+  (`chmod +x`) and run it.
+
+Your browser opens fit-push; drop your activity files onto the page. A small window
+stays open while it runs: close it to stop fit-push. Starting it again while it runs just
+opens the browser.
+
+### From source
+
 You need [Python 3.10 or newer](https://www.python.org/downloads/).
 
 ```bash
@@ -42,10 +59,8 @@ cd fit-push
 python scripts/run.py
 ```
 
-Open **http://127.0.0.1:8000** and drop your activity files onto the page. The first
-start takes a minute while it installs what it needs; later starts are instant.
-
-Stop it with **Ctrl+C**. Run it again any time with `python scripts/run.py`.
+Open **http://127.0.0.1:8000**. The first start takes a minute while it installs what it
+needs; later starts are instant. Stop it with **Ctrl+C**.
 
 ## Your data is safe
 
@@ -53,7 +68,8 @@ Stop it with **Ctrl+C**. Run it again any time with `python scripts/run.py`.
   `~/Library/Application Support/fit-push` on macOS and `~/.local/share/fit-push` on Linux.
 - A backup is made automatically every time the app starts. If something ever goes wrong:
   ```bash
-  python scripts/run.py --restore latest
+  fit-push --restore latest              # the downloaded app (fit-push.exe on Windows)
+  python scripts/run.py --restore latest # from source
   ```
 - Coming from **fit-git** (the old name)? Your activities are copied over on the first
   start; nothing is deleted.
@@ -74,7 +90,7 @@ app lists every module with its manual. Run without any with
 | [User guide](docs/USER_GUIDE.md) | every feature, page by page |
 | [Your data](docs/DATA.md) | where data is stored, backups, restore, moving it |
 | [Module manuals](docs/MODULES_MANUAL.md) | manuals of the optional features |
-| [Developing fit-push](docs/DEVELOPMENT.md) | running from source, tests, linting, CI, layout |
+| [Developing fit-push](docs/DEVELOPMENT.md) | running from source, tests, linting, CI, releases, layout |
 | [Writing a module](modules/README.md) | how friends can add features ([rules](modules/RULES.md), [SDK](docs/SDK.md)) |
 | [HTTP API](docs/API.md) | the JSON API, for scripting |
 | [AGENTS.md](AGENTS.md) | conventions for contributors and AI coding agents |

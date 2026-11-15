@@ -1,0 +1,111 @@
+name: Release
+
+# Push a tag "vX.Y.Z" (after `python scripts/release.py bump X.Y.Z` and a commit) to build the
+# desktop app for Windows, Linux and macOS and publish a GitHub release with the files.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to (re)build, e.g. v0.3.0"
+        required: true
+
+permissions:
+  contents: read
+
+env:
+  TAG: ${{ inputs.tag || github.ref_name }}
+
+jobs:
+  check:
+    name: Version and tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements*.txt
+      - run: python scripts/release.py check-tag "$TAG"
+      - run: pip install -r requirements-dev.txt
+      - run: ruff check . && ruff format --check .
+      - run: python -m pytest -q
+      - run: python scripts/modules.py check
+
+  build:
+    name: Build (${{ matrix.os }})
+    needs: check
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # ubuntu-22.04: an older glibc, so the Linux binary runs on more distributions.
+        os: [windows-latest, ubuntu-22.04, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements*.txt
+      - run: pip install -r requirements-release.txt
+      - name: Inno Setup
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe")) { choco install innosetup -y --no-progress }
+      - name: Build
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then python scripts/release.py build --require-installer; else python scripts/release.py build; fi
+      - name: Smoke test the single-file build
+        shell: bash
+        run: |
+          exe=$(ls dist/fit-push-* | grep -v -E '\.(zip|tar\.gz)$|-setup\.exe$' | head -1)
+          chmod +x "$exe"
+          "$exe" --version
+          "$exe" --data-dir "$RUNNER_TEMP/fp" --port 8799 --no-open > "$RUNNER_TEMP/fp.log" 2>&1 &
+          for i in $(seq 1 60); do curl -sf http://127.0.0.1:8799/api/version && break; sleep 1; done
+          curl -sf http://127.0.0.1:8799/api/version | grep -q fit-push || { cat "$RUNNER_TEMP/fp.log"; exit 1; }
+          curl -sf http://127.0.0.1:8799/ > /dev/null
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.os }}
+          path: |
+            dist/fit-push-*
+          if-no-files-found: error
+
+  release:
+    name: Publish
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Checksums and notes
+        run: |
+          (cd dist && sha256sum fit-push-* > SHA256SUMS.txt && cat SHA256SUMS.txt)
+          python3 scripts/release.py notes "$TAG" > notes.md
+      - name: Create or update the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --clobber
+          else
+            gh release create "$TAG" dist/* --title "fit-push ${TAG#v}" --notes-file notes.md
+          fi

@@ -11,3 +11,5 @@ shots/
 shots-core/
 gl-code-quality-report.json
 report.xml
+build/
+dist/

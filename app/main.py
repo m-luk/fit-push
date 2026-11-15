@@ -8,7 +8,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import paths
+from . import __version__, paths
 from .core import Core, Invalid, NotFound
 from .modules import load_modules
 from .routes import activities, segments, system
@@ -28,7 +28,7 @@ def create_app(
     """
     store = Store(db_path or paths.db_path())
     core = Core(store)
-    app = FastAPI(title="fit-push", version="0.2.0")
+    app = FastAPI(title="fit-push", version=__version__)
     app.state.store = store
     app.state.core = core
 

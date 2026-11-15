@@ -53,6 +53,7 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "scripts/*" = ["T20"]
+"packaging/*" = ["T20"]
 "app/__main__.py" = ["T20"]
 ".claude/**" = ["T20"]
 "tests/**" = ["T20"]
