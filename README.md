@@ -54,12 +54,14 @@ Saving new settings recalculates every stored activity.
 
 ## Running
 
-The quickest way is the run script. It creates `.venv` and installs the
-requirements on first run (and again whenever `requirements.txt` changes):
+The quickest way is the run script (any OS, any Python 3.10+). It creates
+`.venv` and installs the requirements on first run, and again whenever they
+change:
 
-```powershell
-./scripts/run.ps1                     # Windows; -Port 9000 -Reload -BindHost 0.0.0.0
-./scripts/run.sh                      # Linux/macOS; PORT=9000 RELOAD=1 HOST=0.0.0.0
+```bash
+python scripts/run.py                        # http://127.0.0.1:8000
+python scripts/run.py --port 9000 --reload   # --host 0.0.0.0 to expose on the LAN
+python scripts/run.py --tests                # install dev requirements, run pytest
 ```
 
 In VS Code, **Terminal → Run Build Task** (Ctrl+Shift+B) runs `fit-git: run`;
