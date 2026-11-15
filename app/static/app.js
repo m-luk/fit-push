@@ -273,7 +273,9 @@
     state.current = null; renderList();
     if (!state.activities.length) {
       main.innerHTML = `<div class="welcome"><h1>Your training, analysed</h1>
-        <p class="muted">Upload activity files from your watch, bike computer or app — FIT, GPX and TCX are supported (gzipped too). Drag them anywhere on this page or use <b>Upload</b>.</p></div>`;
+        <p class="muted">Upload activity files from your watch, bike computer or app — FIT, GPX and TCX are supported (gzipped too). Drag them anywhere on this page or use <b>Upload</b>.</p>
+        <p><button class="btn primary" data-tour-start>🎓 Take the guided tour</button></p>
+        <p class="muted small-note">A few minutes, hands-on, on a simulated run. Your data is not touched.</p></div>`;
       return;
     }
     main.innerHTML = `<div class="spinner">Loading…</div>`;
@@ -1324,7 +1326,7 @@
       </div>
       <div class="grid two">
         <div class="card"><div id="map" class="seg-map"></div></div>
-        <div class="card"><h2><span>Best efforts</span><span class="muted" style="font-weight:400">fastest first</span></h2>
+        <div class="card" id="seg-efforts"><h2><span>Best efforts</span><span class="muted" style="font-weight:400">fastest first</span></h2>
           ${s.efforts.length ? `<div class="table-scroll lap-list"><table><thead><tr><th>#</th><th>Time</th><th>${pace ? "Pace" : "Speed"}</th>${has("avg_hr") ? "<th>Avg HR</th>" : ""}${has("avg_power") ? "<th>Power</th>" : ""}<th>Date</th><th>Activity</th></tr></thead><tbody>
             ${s.efforts.map((e) => `<tr><td>${e.rank === 1 ? "🏆" : e.rank}</td><td><a href="${effortHref(e)}" title="Show this effort in the activity">${fmtDur(e.elapsed_s)}</a></td><td>${speedTxt(e.speed_ms)}</td>
               ${has("avg_hr") ? `<td>${fmtNum(e.avg_hr, 0)}</td>` : ""}${has("avg_power") ? `<td>${fmtNum(e.avg_power, 0)}</td>` : ""}
@@ -1620,6 +1622,281 @@
       </div>`;
   }
 
+  // ------------------------------------------------------------------ tutorial (guided tour)
+  // A hands-on tour on a simulated run (POST /api/tutorial). Each step points at a real
+  // control and waits until the user has done the thing (polled `done()`); "Skip step"
+  // runs `auto()` so later steps still find what they need. Exit (or Esc inside the card)
+  // leaves at any time and offers to remove the demo data (DELETE /api/tutorial).
+  const tour = { on: false, i: 0, id: null, timer: null, seen: null, doneAt: 0, ask: false, base: {} };
+  const tourHash = (q = "") => `#/activity/${tour.id}${q}`;
+  const onTourRun = () => state.current?.id === tour.id;
+  const fullRun = () => onTourRun() && !state.current.window;
+  const lapsView = () => onTourRun() && !!state.current.window && /[?&]laps=1/.test(location.hash);
+  const clickEl = (sel) => { const el = $(sel); if (el) el.click(); return !!el; };
+  const go = (hash) => { if (location.hash !== hash) location.hash = hash; };
+
+  const TOUR = [
+    { title: "Welcome to fit-push 👋", center: true,
+      body: `This tour works on a <b>simulated 5-lap park run</b>, so your own activities are not touched.
+        Each step asks you to try something and moves on once you have. <b>Skip step</b> does it for you,
+        <b>Exit</b> (or Esc) leaves the tour at any time.`, next: "Start the tour" },
+    { title: "Open an activity", target: () => $(`#activity-list a[href="#/activity/${tour.id}"]`),
+      body: "Your activities are listed here, newest first. Click <b>Tutorial run</b> to open it.",
+      page: "#/", done: fullRun, auto: () => go(tourHash()) },
+    { title: "The summary", target: () => $(".tiles"), page: "run",
+      body: "Distance, moving time, pace, elevation, heart rate, cadence… all worked out from the raw file on your computer.",
+      next: "Next" },
+    { title: "Data streams", target: () => $("#charts-card"), page: "run",
+      body: "Move the pointer over a chart. The values appear above the charts and a dot follows on the map.",
+      done: () => state.hoverIdx != null },
+    { title: "Select a stretch", target: () => $("#charts"), page: "run",
+      body: "Now <b>drag across a chart</b> to select a part of the run, for example the middle.",
+      done: () => onTourRun() && !!state.sel && !$("#sel-bar")?.hidden,
+      auto: () => {
+        const a = state.current, n = a.series.idx.length;
+        state.sel = { i0: Math.round(n * 0.35), i1: Math.round(n * 0.6) };
+        renderSelection(a);
+      } },
+    { title: "The selection bar", target: () => $("#sel-bar"), page: "run",
+      body: "It shows the stretch's distance and time. You can export it, save it as an activity or turn it into a segment. Click <b>View selection</b> to zoom in on it.",
+      done: () => onTourRun() && !!state.current.window && !lapsView(),
+      auto: () => { if (!clickEl("#sel-bar a.btn.primary")) go(tourHash("?start=600&end=1200")); } },
+    { title: "A trimmed view", target: () => $(".trim-banner"),
+      body: "Every number on the page now covers just this stretch. It is temporary; the original stays as it is. Click <b>Show full activity</b> to go back.",
+      done: fullRun, auto: () => go(tourHash()) },
+    { title: "Colour the track", target: () => $("#ov-sel"), page: "run",
+      body: "Colour the route on the map by a measure: choose <b>Pace</b>, <b>Heart rate</b> or <b>Elevation</b>.",
+      done: () => state.overlay !== "none",
+      auto: () => { const s = $("#ov-sel"); if (s) { s.value = "speed"; s.dispatchEvent(new Event("change")); } } },
+    { title: "Colour patterns", target: () => $("#pal-wrap"), page: "run",
+      body: "Pick a colour pattern you like (Red hot, Viridis, Rainbow…). ⇄ reverses it.",
+      done: () => state.palette !== tour.base.palette || state.paletteReverse !== tour.base.reverse, next: "Next" },
+    { title: "A bigger map", target: () => $("#map-size"), page: "run",
+      body: "Click <b>⤢ Enlarge</b>. The big map zooms with the mouse wheel.",
+      done: () => !!$("#map-card.expanded"), auto: () => setMapExpanded(true) },
+    { title: "…and back", target: () => $("#map-size"), page: "run",
+      body: "Click <b>⤡ Minimize</b> (or press Esc) to bring the map back into the page.",
+      done: () => onTourRun() && !$("#map-card.expanded"), auto: () => setMapExpanded(false) },
+    { title: "Laps found", target: () => $(".lap-hint"), page: "run",
+      body: "fit-push noticed that this run repeats a loop. Click <b>Analyze laps</b>.",
+      done: lapsView, auto: () => { if (!clickEl(".lap-hint a")) go(tourHash("?laps=1")); } },
+    { title: "Compare laps", target: () => $("#lap-list"), page: "laps",
+      body: "Every lap side by side. <b>Click a lap</b> (try the fastest) to compare it with the whole run and the average lap in the summary above. ↑/↓ steps through them.",
+      done: () => lapsView() && state.lap != null, auto: () => clickEl('#lap-list tr[data-lap="3"]') },
+    { title: "Make it a segment", target: () => $("#sel-segment"), page: "laps",
+      body: "Segments are stretches you can race against yourself. Click <b>Create segment</b> and confirm the name. Every pass of the loop becomes an effort.",
+      done: () => /^#\/segment\/\d+/.test(location.hash),
+      auto: async () => {
+        const a = state.current;
+        if (!a?.series || !state.sel) { go(tourHash("?laps=1")); return; }
+        const s = await api("/api/segments", { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ activity_id: a.id, start: a.series.idx[state.sel.i0], end: a.series.idx[state.sel.i1], name: "Tutorial loop" }) });
+        await loadSegments(); go(`#/segment/${s.id}`);
+      } },
+    { title: "The leaderboard", target: () => $("#seg-efforts"),
+      body: "Each lap is an effort, fastest first. Click a time to jump to that effort in its activity. New uploads that follow this loop show up here by themselves.",
+      next: "Next" },
+    { title: "All segments", target: () => $('[data-tab="segments"]'),
+      body: "The <b>Segments</b> tab lists all of them, with the best time of each.", next: "Next" },
+    { title: "Tag it", target: () => $("#tag-row"), page: "run",
+      body: "Tags help you find activities again. Type a tag, for example <b>intervals</b>, and press Enter.",
+      done: () => onTourRun() && (state.current.tags || []).some((t) => t !== "tutorial"),
+      auto: async () => {
+        const a = state.current;
+        a.tags = (await api(`/api/activities/${a.id}/tags`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tags: [...a.tags, "intervals"] }) })).tags;
+        await Promise.all([loadTags(), loadList()]); renderTagEditor(a);
+      } },
+    { title: "Filter the list", target: () => ($("#tag-filter")?.hidden ? $("#sport-filter") : $("#tag-filter")),
+      body: "Show only one sport or one tag in the list here.", next: "Next" },
+    { title: "Extras", target: () => $('.topbar a[href="#/modules"]'),
+      body: () => `Optional features are <b>modules</b>${modulePages.size ? `, such as ${[...modulePages.values()].map((p) => `<b>${esc(p.icon)} ${esc(p.label)}</b>`).join(", ")} in the tabs` : ""}. The <b>Modules</b> button lists them with their manuals.`,
+      next: "Next" },
+    { title: "Your turn", target: () => $(".topbar label.btn.primary"),
+      body: "That's the tour! Upload your own FIT, GPX or TCX files here, or drop them anywhere on the page. You can take the tour again with the <b>Tour</b> button.",
+      next: "Finish", finish: true },
+  ];
+
+  function tourSave() {
+    try { if (tour.on) sessionStorage.setItem("fitpush:tour", JSON.stringify({ i: tour.i, id: tour.id })); else sessionStorage.removeItem("fitpush:tour"); } catch { /* ignore */ }
+  }
+
+  async function startTour(resume) {
+    if (tour.on) return;
+    let r;
+    try { r = await api("/api/tutorial", { method: "POST" }); } catch (e) { toast("Could not start the tour: " + e.message); return; }
+    tour.id = r.activity_id;
+    if (r.created) await Promise.all([loadList(), loadTags()]);
+    Object.assign(tour, { on: true, i: resume?.id === tour.id ? resume.i : 0, seen: null, ask: false,
+      base: { palette: state.palette, reverse: state.paletteReverse } });
+    // Clear list filters that could hide the tutorial run.
+    if (state.sport || state.tagFilter) { state.sport = ""; state.tagFilter = ""; $("#sport-filter").value = ""; renderTagFilter(); renderList(); }
+    document.body.insertAdjacentHTML("beforeend", `
+      <div class="tour-ring" id="tour-ring" hidden></div>
+      <section class="tour-card" id="tour-card" role="dialog" aria-labelledby="tour-title" aria-live="polite" tabindex="-1"></section>`);
+    $("#tour-card").addEventListener("click", onTourClick);
+    $("#tour-card").addEventListener("keydown", (e) => {
+      // Esc minimizes an enlarged map first (the app's own handler), then leaves the tour.
+      if (e.key !== "Escape" || $("#map-card.expanded")) return;
+      e.stopPropagation(); tourAsk();
+    });
+    tourShow();
+    tour.timer = setInterval(tourTick, 250);
+  }
+
+  function tourStep() { return TOUR[tour.i]; }
+
+  // Is the step's page showing? "run" = the full tutorial run, "laps" = its laps view.
+  function tourOnPage(st) {
+    if (st.page === "run") return fullRun();
+    if (st.page === "laps") return lapsView();
+    return true;
+  }
+  const tourPageHash = (st) => (st.page === "run" ? tourHash() : st.page === "laps" ? tourHash("?laps=1") : st.page);
+
+  function tourShow() {
+    const st = tourStep(), card = $("#tour-card");
+    if (!card) return;
+    tour.seen = null; tour.doneAt = 0;
+    tourSave();
+    if (tour.ask) {
+      card.innerHTML = `<h2 id="tour-title">Leave the tour?</h2>
+        <p>The tutorial run, and any clips or segments you made from it, can be removed now. Your own data is never touched.</p>
+        <div class="tour-actions"><button class="btn primary" data-tour="remove">Remove demo data</button>
+          <button class="btn" data-tour="keep">Keep it</button>
+          ${tourStep().finish ? "" : `<button class="btn ghost" data-tour="back">Back to the tour</button>`}</div>`;
+    } else {
+      const body = typeof st.body === "function" ? st.body() : st.body;
+      const action = !!st.done && !st.next;
+      card.innerHTML = `<div class="tour-progress" aria-hidden="true"><span style="width:${((tour.i + 1) / TOUR.length) * 100}%"></span></div>
+        <div class="tour-meta muted">${tour.i ? `Step ${tour.i} of ${TOUR.length - 1}` : "Guided tour"}${action ? ` · <span class="tour-todo">your turn</span>` : ""}</div>
+        <h2 id="tour-title">${esc(st.title)}</h2><p>${body}</p>
+        <p class="tour-away muted" hidden>${st.page ? `This step is on another page. <button class="btn small" data-tour="there">Take me there</button>` : "Not on this page: use <b>Back</b>, or <b>Skip step</b>."}</p>
+        <div class="tour-actions">
+          ${st.next ? `<button class="btn primary" data-tour="next">${esc(st.next)}</button>` : ""}
+          ${tour.i && !st.finish ? `<button class="btn" data-tour="skip" title="${st.auto ? "Do this step for me and go on" : "Go to the next step"}">Skip step</button>` : ""}
+          ${tour.i > 1 ? `<button class="btn ghost" data-tour="prev" title="Previous step">Back</button>` : ""}
+          <button class="btn ghost" data-tour="exit" title="Leave the tour (Esc)">Exit</button>
+        </div>`;
+      const t = st.target?.();
+      if (t) t.scrollIntoView({ block: "center", behavior: "auto" });
+    }
+    card.focus({ preventScroll: true });
+    const ring = $("#tour-ring");
+    ring?.classList.add("jump"); // a new step: no slide from the previous target
+    tourPlace();
+    requestAnimationFrame(() => ring?.classList.remove("jump"));
+  }
+
+  async function onTourClick(e) {
+    const b = e.target.closest("[data-tour]");
+    if (!b) return;
+    const act = b.dataset.tour, st = tourStep();
+    if (act === "next") { if (st.finish) tourAsk(); else tourGo(tour.i + 1); }
+    else if (act === "prev") tourGo(tour.i - 1);
+    else if (act === "exit") tourAsk();
+    else if (act === "back") { tour.ask = false; tourShow(); }
+    else if (act === "there") go(tourPageHash(st));
+    else if (act === "skip") {
+      b.disabled = true;
+      try {
+        if (st.page && !tourOnPage(st)) { go(tourPageHash(st)); await tourWait(() => tourOnPage(st)); }
+        await st.auto?.();
+      } catch (err) { toast("Could not do that step: " + err.message); }
+      tourGo(tour.i + 1);
+    } else if (act === "remove" || act === "keep") endTour(act === "remove");
+  }
+
+  // Wait (up to 8 s) for an async page render to finish.
+  async function tourWait(cond) {
+    for (let k = 0; k < 32 && !cond(); k++) await new Promise((r) => setTimeout(r, 250));
+  }
+
+  function tourGo(i) {
+    tour.i = Math.max(0, Math.min(TOUR.length - 1, i));
+    tour.ask = false;
+    tourShow();
+  }
+
+  function tourAsk() { tour.ask = true; tourShow(); }
+
+  async function endTour(remove) {
+    clearInterval(tour.timer);
+    tour.on = false; tour.ask = false; tourSave();
+    $("#tour-card")?.remove(); $("#tour-ring")?.remove();
+    if ($("#map-card.expanded")) setMapExpanded(false);
+    if (!remove) { toast("Tour closed. The tutorial run stays in your list (tag #tutorial)."); return; }
+    try {
+      const r = await api("/api/tutorial", { method: "DELETE" });
+      await Promise.all([loadList(), loadSegments(), loadTags()]);
+      toast(`Demo data removed (${r.activities} activit${r.activities === 1 ? "y" : "ies"}, ${r.segments} segment${r.segments === 1 ? "" : "s"})`);
+    } catch (e) { toast("Could not remove the demo data: " + e.message); }
+    if (location.hash === "#/" || !location.hash) route(); else location.hash = "#/";
+  }
+
+  function tourTick() {
+    if (!tour.on) return;
+    const st = tourStep();
+    tourPlace();
+    if (tour.ask) return;
+    const away = $("#tour-card .tour-away");
+    if (away) away.hidden = !(st.page && !tourOnPage(st)) && !!(st.center || st.target?.());
+    if (!st.done) return;
+    let ok = false;
+    try { ok = !!st.done(); } catch { ok = false; }
+    if (!ok) { tour.doneAt = 0; return; }
+    if (st.next) { // optional action: just highlight the button
+      $('#tour-card [data-tour="next"]')?.classList.add("tour-ready");
+      return;
+    }
+    if (!tour.doneAt) {
+      tour.doneAt = Date.now();
+      const todo = $("#tour-card .tour-todo");
+      if (todo) { todo.textContent = "✓ done"; todo.classList.add("ok"); }
+      return;
+    }
+    if (Date.now() - tour.doneAt > 700) tourGo(tour.i + 1);
+  }
+
+  // Ring around the step's target and the card next to it (docked at the bottom on phones).
+  function tourPlace() {
+    const card = $("#tour-card"), ring = $("#tour-ring");
+    if (!card || !ring) return;
+    const st = tourStep();
+    const t = !tour.ask && !st.center ? st.target?.() : null;
+    const r = t && t.offsetParent !== null ? t.getBoundingClientRect() : null;
+    const vw = window.innerWidth, vh = window.innerHeight;
+    if (r && r.width && r.bottom > 0 && r.top < vh) {
+      ring.hidden = false;
+      Object.assign(ring.style, { left: `${r.left - 6}px`, top: `${r.top - 6}px`, width: `${r.width + 12}px`, height: `${r.height + 12}px` });
+    } else ring.hidden = true;
+    const narrow = vw < 640;
+    card.classList.toggle("docked", narrow);
+    if (narrow) { Object.assign(card.style, { left: "", top: "" }); return; }
+    const cw = card.offsetWidth, ch = card.offsetHeight, gap = 14, pad = 16;
+    let x, y;
+    if (!r || ring.hidden) { x = (vw - cw) / 2; y = Math.max(pad, (vh - ch) / 2); }
+    else {
+      x = Math.min(Math.max(pad, r.left), vw - cw - pad);
+      if (r.bottom + gap + ch < vh - pad) y = r.bottom + gap;
+      else if (r.top - gap - ch > pad) y = r.top - gap - ch;
+      else { // beside the target, or the bottom-right corner when it fills the screen
+        x = r.right + gap + cw < vw - pad ? r.right + gap : r.left - gap - cw > pad ? r.left - gap - cw : vw - cw - pad;
+        y = Math.min(Math.max(pad, r.top), vh - ch - pad);
+      }
+    }
+    Object.assign(card.style, { left: `${Math.round(x)}px`, top: `${Math.round(y)}px` });
+  }
+  window.addEventListener("resize", () => tour.on && tourPlace());
+  window.addEventListener("scroll", () => tour.on && tourPlace(), { passive: true, capture: true });
+
+  $("#tour-btn").addEventListener("click", () => startTour());
+  main.addEventListener("click", (e) => { if (e.target.closest("[data-tour-start]")) startTour(); });
+  function resumeTour() {
+    let saved = null;
+    try { saved = JSON.parse(sessionStorage.getItem("fitpush:tour") || "null"); } catch { saved = null; }
+    if (saved) startTour(saved);
+  }
+
   // ------------------------------------------------------------------ router
   function route() {
     document.body.classList.remove("map-open");
@@ -1647,5 +1924,5 @@
   $("#tag-filter").addEventListener("change", (e) => { state.tagFilter = e.target.value; renderList(); });
   loadSports()
     .then(() => Promise.all([loadList(), loadSegments(), loadTags(), loadModules()]))
-    .then(route).catch((e) => { main.innerHTML = `<div class="welcome"><h1>Cannot reach the server</h1><p class="muted">${esc(e.message)}</p></div>`; });
+    .then(() => { route(); resumeTour(); }).catch((e) => { main.innerHTML = `<div class="welcome"><h1>Cannot reach the server</h1><p class="muted">${esc(e.message)}</p></div>`; });
 })();

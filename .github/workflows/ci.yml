@@ -75,6 +75,8 @@ jobs:
         run: python .claude/skills/ui-verify/scripts/ui_smoke.py --out shots --channel bundled
       - name: Core only
         run: python .claude/skills/ui-verify/scripts/ui_smoke.py --out shots-core --channel bundled --core-only --port 8791
+      - name: Guided tour
+        run: python .claude/skills/ui-verify/scripts/ui_tour.py --out shots-tour --channel bundled
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -82,4 +84,5 @@ jobs:
           path: |
             shots
             shots-core
+            shots-tour
           retention-days: 7

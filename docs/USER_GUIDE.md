@@ -2,6 +2,19 @@
 
 Everything fit-push can do, page by page. Back to the [README](../README.md).
 
+## Guided tour
+
+Click **🎓 Tour** in the top bar (or **Take the guided tour** on the empty start page). The
+tour adds a simulated 5-lap park run, tagged `#tutorial`, and walks you through the app on
+it: you open it, select a stretch, zoom in, colour the map, enlarge it, analyse the laps,
+make a segment and tag the run. Each step waits until you have done it and then moves on.
+
+- **Skip step** does the step for you, **Back** goes one step back.
+- **Exit** (or Esc while the tour card has focus) leaves at any time and asks whether to
+  remove the demo data: the tutorial run, clips you saved from it and segments made on them.
+  Your own activities and segments are never touched. **Keep it** leaves the run in your list.
+- Reloading the page continues the tour where you were.
+
 ## Supported files
 
 | Format | Source | Notes |

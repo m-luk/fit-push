@@ -163,6 +163,11 @@ Use the **ui-development** skill for any change under `app/static/`, and the
 - Async renders guard every `await` with the render token; dispose maps (and module
   cleanups) before replacing the page; no animated programmatic map moves.
 - `window.fitpush` is a public contract (docs/SDK.md): extend, don't break.
+- The **guided tour** (`TOUR` in app.js, simulated run from `app/tutorial.py`) points at real
+  controls by selector. Renaming or removing one of those ids/classes breaks a step:
+  `ui_tour.py` (ui-verify) catches it. A new core feature worth showing gets a tour step.
+- Tutorial data is marked by `device = "fit-push tutorial"` (clips keep it; segments keep
+  their source activity); `DELETE /api/tutorial` removes exactly that. Never key it on tags.
 
 ## Tests
 

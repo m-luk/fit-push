@@ -53,6 +53,16 @@ temp database deleted afterwards.
 `fail_*.png` for failures) with the Read tool. The script cannot see overlaps,
 clipped columns or unreadable colours.
 
+## Guided tour
+
+```powershell
+& $env:TEMP\fitpush-pw\Scripts\python.exe .claude\skills\ui-verify\scripts\ui_tour.py --out $env:TEMP\fitpush-tour
+```
+
+Runs the tour on an empty database twice: hands-on (every step done like a user) and by
+skipping every step, then checks Exit (remove / keep demo data), Esc, resume after reload
+and the docked card at 390 px. Run it after changing anything a tour step points at.
+
 ## Checking a new feature
 
 Extend the smoke test with a `step(...)` for the new flow, or write a short

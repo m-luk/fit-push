@@ -12,7 +12,7 @@ from __future__ import annotations
 import hashlib
 import re
 
-from . import sports
+from . import sports, tutorial
 from .analytics import activity_to_columns, analyse, point_count, window_columns
 from .events import EventBus
 from .laps import detect_laps, lap_report
@@ -279,6 +279,44 @@ class Core:
         if not self.store.delete_segment(segment_id):
             raise NotFound("segment not found")
         self.events.emit("segment.deleted", segment_id=segment_id)
+
+    # ------------------------------------------------------------------ tutorial
+    def _tutorial_ids(self) -> list[int]:
+        rows = self.store.run("SELECT id FROM activities WHERE device = ? ORDER BY id", (tutorial.DEVICE,))
+        return [r["id"] for r in rows]
+
+    def tutorial_status(self) -> dict:
+        found = self.store.find_by_hash(tutorial.SHA256)
+        return {"activity_id": found, "activities": len(self._tutorial_ids())}
+
+    def start_tutorial(self) -> dict:
+        """Create the simulated run of the tutorial (or reuse it). Tagged ``tutorial``."""
+        if (existing := self.store.find_by_hash(tutorial.SHA256)) is not None:
+            return {"activity_id": existing, "created": False}
+        act = tutorial.simulated_run()
+        cols = activity_to_columns(act)
+        new_id = self._add(
+            sha256=tutorial.SHA256,
+            filename="tutorial-run.fit",
+            source_format=act.source_format,
+            device=act.device,
+            name=act.name,
+            sport=act.sport,
+            result=analyse(cols, act.sport, self.settings()),
+            cols=cols,
+        )
+        self.store.set_tags(new_id, ["tutorial"])
+        return {"activity_id": new_id, "created": True}
+
+    def end_tutorial(self) -> dict:
+        """Remove the tutorial run, clips saved from it and segments created on them."""
+        ids = self._tutorial_ids()
+        segments = [s["id"] for s in self.store.list_segments() if s.get("source_activity_id") in ids]
+        for seg_id in segments:
+            self.delete_segment(seg_id)
+        for act_id in ids:
+            self.delete_activity(act_id)
+        return {"activities": len(ids), "segments": len(segments)}
 
     # ------------------------------------------------------------------ catalogue
     @staticmethod

@@ -9,6 +9,7 @@ data/
 .cache/
 shots/
 shots-core/
+shots-tour/
 gl-code-quality-report.json
 report.xml
 build/

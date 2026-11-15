@@ -184,7 +184,7 @@ dialog input { width: 90px; }
 .toast {
   position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%) translateY(20px); opacity: 0;
   background: var(--text-primary); color: var(--surface-1); padding: 10px 16px; border-radius: 8px;
-  transition: .2s; pointer-events: none; z-index: 2000; max-width: calc(100vw - 32px);
+  transition: .2s; pointer-events: none; z-index: 2300; max-width: calc(100vw - 32px);
 }
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 .spinner { padding: 40px; text-align: center; color: var(--text-muted); }
@@ -306,3 +306,32 @@ td.name-cell { text-align: left; max-width: 260px; overflow: hidden; text-overfl
 .docs-grid { align-items: start; }
 
 a.btn { text-decoration: none; display: inline-flex; align-items: center; color: var(--text-primary); }
+
+/* guided tour */
+.tour-ring {
+  position: fixed; z-index: 2100; pointer-events: none; border-radius: 10px;
+  border: 2px solid var(--accent); box-shadow: 0 0 0 4px var(--sel-fill);
+  transition: left .15s, top .15s, width .15s, height .15s;
+  animation: tour-pulse 1.8s ease-in-out infinite;
+}
+.tour-ring.jump { transition: none; }
+@keyframes tour-pulse { 50% { box-shadow: 0 0 0 9px var(--sel-fill); } }
+.tour-card {
+  position: fixed; z-index: 2200; width: 360px; max-width: calc(100vw - 32px);
+  background: var(--surface-1); color: var(--text-primary); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 14px 16px 12px; box-shadow: 0 8px 28px rgba(0, 0, 0, 0.25);
+  outline: none;
+}
+.tour-card.docked { left: 16px !important; right: 16px; bottom: 16px; top: auto !important; width: auto; max-height: 45vh; overflow: auto; }
+.tour-card h2 { font-size: 16px; margin: 4px 0 6px; }
+.tour-card p { margin: 0 0 10px; color: var(--text-secondary); line-height: 1.45; font-size: 14px; }
+.tour-card p b { color: var(--text-primary); }
+.tour-meta { font-size: 12px; }
+.tour-todo { color: var(--accent); font-weight: 600; }
+.tour-todo.ok { color: var(--text-primary); }
+.tour-progress { height: 3px; background: var(--surface-2); border-radius: 2px; overflow: hidden; margin-bottom: 8px; }
+.tour-progress span { display: block; height: 100%; background: var(--accent); }
+.tour-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.tour-actions .tour-ready { box-shadow: 0 0 0 3px var(--sel-fill); }
+@media (prefers-reduced-motion: reduce) { .tour-ring { animation: none; transition: none; } }
+@media (max-width: 640px) { .btn-label { display: none; } .brand { white-space: nowrap; } }

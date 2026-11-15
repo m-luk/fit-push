@@ -32,6 +32,9 @@ No account, no cloud: your data stays on your machine.</p>
 Sports: running, cycling (road, gravel, MTB), walking, hiking, skiing, ski touring,
 sailing, kayaking and swimming.
 
+New here? Click **🎓 Tour** in the app: a few hands-on minutes on a simulated run that show
+every feature. Your own data is not touched.
+
 ## Get started
 
 ### Download (Windows, macOS, Linux)

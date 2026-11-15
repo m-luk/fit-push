@@ -60,9 +60,10 @@ ui-smoke:
     - pip install -r requirements-dev.txt playwright==1.49.0
     - python .claude/skills/ui-verify/scripts/ui_smoke.py --out shots --channel bundled
     - python .claude/skills/ui-verify/scripts/ui_smoke.py --out shots-core --channel bundled --core-only --port 8791
+    - python .claude/skills/ui-verify/scripts/ui_tour.py --out shots-tour --channel bundled
   artifacts:
     when: always
-    paths: [shots, shots-core]
+    paths: [shots, shots-core, shots-tour]
     expire_in: 1 week
 
 # ----------------------------------------------------------------------------- release

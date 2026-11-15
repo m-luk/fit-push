@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from . import __version__, paths
 from .core import Core, Invalid, NotFound
 from .modules import load_modules
-from .routes import activities, segments, system
+from .routes import activities, segments, system, tutorial
 from .storage import Store
 
 STATIC_DIR = Path(__file__).parent / "static"
@@ -40,7 +40,7 @@ def create_app(
     async def invalid(_: Request, exc: Invalid):
         return JSONResponse({"detail": str(exc)}, status_code=422)
 
-    for router in (activities.router, segments.router, system.router):
+    for router in (activities.router, segments.router, system.router, tutorial.router):
         app.include_router(router)
     app.state.modules = load_modules(app, core, modules, Path(modules_dir) if modules_dir else None)
 
