@@ -295,6 +295,11 @@ td.name-cell { text-align: left; max-width: 260px; overflow: hidden; text-overfl
 #tag-filter[hidden] { display: none; }
 
 /* ---- modules ---- */
+.module-head { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
+.module-head:empty { display: none; }
+.module-head-item { display: flex; align-items: flex-start; gap: 8px; min-width: 0; font-size: 13px; }
+.module-head-label { flex: none; color: var(--text-muted); font-size: 12px; line-height: 24px; }
+.module-head-item .module-body { flex: 1; min-width: 0; }
 .module-error { border: 1px solid var(--danger); border-radius: 8px; padding: 10px 12px; color: var(--text-primary);
   background: color-mix(in srgb, var(--danger) 8%, var(--surface-1)); font-size: 13px; }
 .module-badge { font-size: 11px; font-weight: 400; }

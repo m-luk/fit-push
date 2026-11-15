@@ -28,7 +28,7 @@ from fastapi import APIRouter
 from .analytics import _prepare, analyse, window_columns
 from .core import Core, Invalid, NotFound
 
-SDK_VERSION = "1.1"
+SDK_VERSION = "1.2"
 
 __all__ = ["SDK_VERSION", "CoreAPI", "Invalid", "ModuleContext", "ModuleDB", "NotFound"]
 

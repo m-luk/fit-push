@@ -485,6 +485,7 @@
           <input class="title-input" id="name-input" value="${esc(a.name)}" aria-label="Activity name" maxlength="200">
           <div class="sub">${sportIcon(a.sport)} ${esc(fmtDate(a.start_time))} · ${esc(a.source_format.toUpperCase())}${a.device ? " · " + esc(a.device) : ""}</div>
           <div class="tag-row" id="tag-row"></div>
+          <div class="module-head" id="module-head"></div>
         </div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
           ${a.window ? "" : `<span class="export-group" aria-label="Export full activity"><span class="muted">Export</span>${exportLinks(a, null)}</span>`}
@@ -1446,9 +1447,13 @@
       modulePages.set(id, { module, id, label: def.label || id, icon: def.icon || "🧩", render: def.render });
       renderNav();
     },
-    /** A card on every activity page. render(el, ctx) returns false to hide the card for that activity. */
+    /** A card on every activity page. render(el, ctx) returns false to hide the card for that activity.
+     *  placement "header": a compact line under the title and tags instead of a card below the charts. */
     registerActivityCard(def) {
-      moduleCards.push({ module: moduleOf(def), title: def.title, order: def.order ?? 100, render: def.render });
+      moduleCards.push({
+        module: moduleOf(def), title: def.title, order: def.order ?? 100, render: def.render,
+        placement: def.placement === "header" ? "header" : "card",
+      });
       moduleCards.sort((x, y) => x.order - y.order);
     },
     api, toast, esc, css, askName,
@@ -1521,14 +1526,20 @@
   }
 
   function renderModuleCards(a) {
-    const box = $("#module-cards");
+    const box = $("#module-cards"), head = $("#module-head");
     if (!box) return;
     for (const card of moduleCards) {
       const el = document.createElement("div");
-      el.className = "card module-card";
       el.dataset.module = card.module;
-      el.innerHTML = `<h2><span>${esc(card.title)}</span><span class="muted module-badge" title="Provided by a module">${esc(card.module)}</span></h2><div class="module-body"></div>`;
-      box.append(el);
+      if (card.placement === "header" && head) {
+        el.className = "module-head-item";
+        el.innerHTML = `<span class="module-head-label" title="${esc(card.title)} (module: ${esc(card.module)})">${esc(card.title)}</span><div class="module-body"></div>`;
+        head.append(el);
+      } else {
+        el.className = "card module-card";
+        el.innerHTML = `<h2><span>${esc(card.title)}</span><span class="muted module-badge" title="Provided by a module">${esc(card.module)}</span></h2><div class="module-body"></div>`;
+        box.append(el);
+      }
       const ctx = {
         activity: a,
         /** Highlight absolute point indices start..end on charts and map, labelled in the selection bar. */

@@ -1,4 +1,4 @@
-# fit-push module SDK (version 1.1)
+# fit-push module SDK (version 1.2)
 
 Everything a module may use from the core. If you need something that is not here,
 do not reach into `app/` internals: propose an SDK addition as a separate core change
@@ -120,7 +120,7 @@ only `window.fitpush` plus the page globals `L` (Leaflet 1.9.4) and `Chart`
 | Call | Effect |
 |---|---|
 | `sdk.registerPage({module, id?, label, icon?, render(el, ctx)})` | adds a tab to the navigation bar (next to the logo) and the route `#/m/<id>` (`id` defaults to the module id) |
-| `sdk.registerActivityCard({module, title, order?, render(el, ctx)})` | adds a card on every activity page (below the data streams). Return `false` from `render` to hide it for that activity. |
+| `sdk.registerActivityCard({module, title, order?, placement?, render(el, ctx)})` | adds a card on every activity page (below the data streams). Return `false` from `render` to hide it for that activity. `placement: "header"` *(1.2)* renders it instead as one compact line under the activity title and tags, labelled with `title` and without card chrome: keep that content to a single line (chips, a short text, a small button). |
 
 `render` may be `async`. If it throws, the user sees an error box in your area and the
 rest of the app keeps working.

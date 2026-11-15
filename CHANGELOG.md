@@ -16,8 +16,9 @@ How to update it: see "Changelog" in `AGENTS.md`.
   imported; ones you already have are recognised and get their Strava title, sport type,
   bike or shoes (with their default sports), commute tag, description and private note.
   Preview shows every change before anything is written.
-- Module SDK 1.1: modules can import files, rename activities, change their sport and
-  offer services to other modules.
+- Module SDK 1.2: modules can import files, rename activities, change their sport, offer
+  services to other modules and place an activity card as a compact line in the
+  activity header.
 - **Gear** module: track shoes, bikes, skis, boats and other equipment with total
   distance, moving time, activity count, last use and a "replace after" distance limit.
   Choose default gear for a sport or a whole sport group (e.g. all cycling); new
