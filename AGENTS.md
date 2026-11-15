@@ -86,6 +86,25 @@ Pushing a tag `vX.Y.Z` builds and publishes releases on GitHub and GitLab; the t
 match `__version__` in `app/__init__.py` (and `pyproject.toml`): use
 `release.py bump X.Y.Z`. Details in `docs/DEVELOPMENT.md`.
 
+## Changelog
+
+`CHANGELOG.md` follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/)
+and SemVer. **Every user-visible change adds an entry under `## [Unreleased]` in the
+same commit** (core and modules alike; pure refactors, tests, CI and agent docs don't).
+
+- Group entries under `### Added`, `Changed`, `Deprecated`, `Removed`, `Fixed`,
+  `Security` (in that order; only the groups you need). Create the group if missing.
+- One bullet per change, written for users: what they can now do or what behaves
+  differently, not how it was implemented. Name modules in bold (`**Gear** module: …`).
+  Newest bullets on top within a group.
+- Never edit a released `## [X.Y.Z] - YYYY-MM-DD` section (except to fix a plain mistake).
+- Don't rename or move `## [Unreleased]` by hand: `release.py bump X.Y.Z` turns it into
+  `## [X.Y.Z] - <today>`, opens a new empty `[Unreleased]` and updates the compare links
+  at the bottom. It refuses to bump when `[Unreleased]` is empty. `release.py notes` uses
+  the version's section as the GitHub/GitLab release notes (falling back to the git log).
+- Choose the version from the entries: `Removed` or breaking API/SDK changes bump the
+  major (minor while < 1.0), `Added` bumps the minor, only `Fixed` bumps the patch.
+
 - Code must keep working **frozen**: find bundled files relative to `__file__` (as
   `app/main.py` and `app/modules.py` do), never relative to the working directory or the
   repo; new data folders need an `--add-data` in `release.py`, new dynamically imported
@@ -189,6 +208,7 @@ Use the **ui-development** skill for any change under `app/static/`, and the
 - Small, focused commits; imperative subject (≤ 72 chars), body says *why*.
 - No attribution / co-author lines.
 - Stage files explicitly; check `git status` so personal files never sneak in.
+- User-visible change: add a `CHANGELOG.md` entry in the same commit (see "Changelog").
 - Docs: `README.md` is the short, user-facing front page; details go in `docs/`
   (`USER_GUIDE.md` features, `DATA.md` storage/backups, `API.md`, `DEVELOPMENT.md`). Update
   the matching doc when behaviour or the API changes; regenerate module docs.

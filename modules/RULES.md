@@ -46,7 +46,8 @@ machine-checkable ones, and CI runs it.
 9. **Regenerate the registry and the combined manual** after any change to a
    manifest or manual: `python scripts/modules.py docs` (updates `modules/INDEX.md`
    and `docs/MODULES_MANUAL.md`). CI fails when they are stale.
-10. **Bump `version`** (semver) when behaviour changes; note it in the README.
+10. **Bump `version`** (semver) when behaviour changes; note it in the README and add a
+    user-facing entry under `[Unreleased]` in `CHANGELOG.md` (see AGENTS.md, "Changelog").
 
 ## Behaviour
 

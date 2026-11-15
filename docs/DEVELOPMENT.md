@@ -51,8 +51,8 @@ free port when 8000 is taken, keep the window open on a start-up error.
 pip install -r requirements-release.txt   # PyInstaller + Pillow (for the icon)
 python scripts/release.py build           # dist/ for this OS, see below
 python scripts/release.py version         # 0.2.0 (app/__init__.py; pyproject.toml must match)
-python scripts/release.py bump 0.3.0      # set the version in both places
-python scripts/release.py notes           # release notes from the commits since the last tag
+python scripts/release.py bump 0.3.0      # set the version in both places, date the CHANGELOG.md section
+python scripts/release.py notes           # release notes: the CHANGELOG.md section (or commits since the last tag)
 ```
 
 `build` writes to `dist/`:
@@ -70,7 +70,9 @@ are bundled without their tests; `FITPUSH_MODULES_DIR` still points the app else
 
 ### Making a release
 
-1. `python scripts/release.py bump X.Y.Z`, commit (`Release X.Y.Z`).
+1. Check that `CHANGELOG.md` `[Unreleased]` lists everything in the release, then
+   `python scripts/release.py bump X.Y.Z` (sets the version and dates the changelog section;
+   `release.py notes` then uses that section as the release notes), commit (`Release X.Y.Z`).
 2. `git tag vX.Y.Z && git push --follow-tags`.
 3. CI builds and publishes:
    - **GitHub** (`.github/workflows/release.yml`): checks the tag against the version, runs

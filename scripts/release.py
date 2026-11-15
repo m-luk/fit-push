@@ -1,10 +1,12 @@
 """Release tooling: version, packaging into a desktop app, installer, checksums.
 
     python scripts/release.py version              print the version (app/__init__.py)
-    python scripts/release.py bump 0.3.0           set the version in app/__init__.py and pyproject.toml
+    python scripts/release.py bump 0.3.0           set the version in app/__init__.py and pyproject.toml and
+                                                   turn CHANGELOG.md's [Unreleased] into [0.3.0] - <today>
     python scripts/release.py check-tag v0.3.0     fail unless the tag matches the version
     python scripts/release.py build                build dist/ for this OS (see below)
-    python scripts/release.py notes [v0.3.0]       release notes from git log since the previous tag
+    python scripts/release.py notes [v0.3.0]       release notes: the version's CHANGELOG.md section
+                                                   (or the git log since the previous tag)
     python scripts/release.py publish-gitlab v0.3.0  (GitLab CI) upload dist/ to the package registry
                                                    and create the release with links to the files
 
@@ -28,6 +30,7 @@ import shutil
 import subprocess
 import sys
 import tarfile
+from datetime import date
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -35,6 +38,8 @@ DIST = ROOT / "dist"
 BUILD = ROOT / "build"
 INIT = ROOT / "app" / "__init__.py"
 PYPROJECT = ROOT / "pyproject.toml"
+CHANGELOG = ROOT / "CHANGELOG.md"
+REPO_URL = "https://github.com/m-luk/fit-push"
 VERSION_RE = re.compile(r'^__version__ = "([^"]+)"', re.M)
 SEMVER = re.compile(r"^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$")
 
@@ -51,12 +56,39 @@ def pyproject_version() -> str:
     return m.group(1) if m else ""
 
 
+def changelog_section(text: str, name: str) -> str:
+    """Body of the ``## [name]`` section of a Keep a Changelog file ("" if missing)."""
+    m = re.search(rf"(?ms)^## \[{re.escape(name)}\][^\n]*\n(.*?)(?=^## \[|^\[[^\]]+\]: |\Z)", text)
+    return m.group(1).strip() if m else ""
+
+
+def changelog_release(text: str, new: str, day: str) -> str:
+    """Move the [Unreleased] entries under ``## [new] - day`` and update the link references."""
+    if not re.search(r"(?m)^## \[Unreleased\]", text):
+        raise SystemExit("CHANGELOG.md has no '## [Unreleased]' section")
+    if re.search(rf"(?m)^## \[{re.escape(new)}\]", text):
+        raise SystemExit(f"CHANGELOG.md already has a section for {new}")
+    if not changelog_section(text, "Unreleased"):
+        raise SystemExit("CHANGELOG.md: [Unreleased] is empty; list the changes of this release first")
+    prev = re.search(r"(?m)^## \[(\d[^\]]*)\]", text)  # newest released version, if any
+    text = re.sub(r"(?m)^## \[Unreleased\][^\n]*$", lambda _: f"## [Unreleased]\n\n## [{new}] - {day}", text, count=1)
+    link = f"{REPO_URL}/compare/v{prev.group(1)}...v{new}" if prev else f"{REPO_URL}/releases/tag/v{new}"
+    unreleased = f"[Unreleased]: {REPO_URL}/compare/v{new}...HEAD\n[{new}]: {link}"
+    if re.search(r"(?m)^\[Unreleased\]: ", text):
+        return re.sub(r"(?m)^\[Unreleased\]: .*$", lambda _: unreleased, text, count=1)
+    return text.rstrip("\n") + f"\n\n{unreleased}\n"
+
+
 def bump(new: str) -> None:
     if not SEMVER.match(new):
         raise SystemExit(f"not a semantic version: {new}")
+    log = CHANGELOG.read_text(encoding="utf-8") if CHANGELOG.is_file() else None
+    log = changelog_release(log, new, date.today().isoformat()) if log is not None else None  # fail before writing
     INIT.write_text(VERSION_RE.sub(f'__version__ = "{new}"', INIT.read_text(encoding="utf-8")), encoding="utf-8")
     text = PYPROJECT.read_text(encoding="utf-8")
     PYPROJECT.write_text(re.sub(r'(?m)^version = "[^"]+"', f'version = "{new}"', text, count=1), encoding="utf-8")
+    if log is not None:
+        CHANGELOG.write_text(log, encoding="utf-8")
     print(f"version {new}; commit, then: git tag v{new} && git push --tags")
 
 
@@ -74,9 +106,13 @@ def notes(tag: str | None) -> str:
         return subprocess.run(["git", *a], cwd=ROOT, capture_output=True, text=True, check=False).stdout.strip()
 
     head = tag or "HEAD"
-    prev = git("describe", "--tags", "--abbrev=0", f"{head}^") if git("tag") else ""
-    log = git("log", "--pretty=format:- %s", f"{prev}..{head}" if prev else head)
-    since = f" since {prev}" if prev else ""
+    section = changelog_section(CHANGELOG.read_text(encoding="utf-8"), version()) if CHANGELOG.is_file() else ""
+    if section:
+        log, since = re.sub(r"(?m)^### ", "#### ", section), ""
+    else:
+        prev = git("describe", "--tags", "--abbrev=0", f"{head}^") if git("tag") else ""
+        log = git("log", "--pretty=format:- %s", f"{prev}..{head}" if prev else head)
+        since = f" since {prev}" if prev else ""
     return (
         f"## fit-push {version()}\n\n"
         "Download the file for your system; Python is included, nothing else to install.\n\n"
