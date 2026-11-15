@@ -308,11 +308,12 @@
     },
   });
 
-  // ---- Activity card ----------------------------------------------------------------------
+  // ---- Activity header line (compact, under the title and tags) -----------------------------
   sdk.registerActivityCard({
     module: "gear",
     title: "Gear",
     order: 60,
+    placement: "header",
     async render(el, ctx) {
       const aid = ctx.activity.id;
       let [list, mine] = await Promise.all([send("/gear", "GET"), send(`/activity/${aid}`, "GET")]);
@@ -323,21 +324,19 @@
         if (choosing) {
           const have = new Set(mine.gear.map((g) => g.id));
           const opts = list.gear.filter((g) => !g.retired || have.has(g.id));
-          el.innerHTML = `<form class="gr-choose"><div class="gr-target-list">${opts.map((g) => `<label class="gr-check">
-              <input type="checkbox" name="gear" value="${g.id}"${have.has(g.id) ? " checked" : ""}> ${kindIcon(g.kind)} ${esc(g.name)}${g.retired ? ' <span class="muted gr-small">(retired)</span>' : ""}</label>`).join("")}</div>
-            <div class="gr-actions"><button type="submit" class="btn primary small">Save</button>
-              <button type="button" class="btn small" data-act="cancel">Cancel</button></div></form>`;
+          el.innerHTML = `<form class="gr-line gr-choose">${opts.map((g) => `<label class="gr-check">
+              <input type="checkbox" name="gear" value="${g.id}"${have.has(g.id) ? " checked" : ""}> ${kindIcon(g.kind)} ${esc(g.name)}${g.retired ? ' <span class="muted gr-small">(retired)</span>' : ""}</label>`).join("")}
+            <button type="submit" class="btn primary small">Save</button>
+            <button type="button" class="btn small ghost" data-act="cancel">Cancel</button></form>`;
           return;
         }
+        const how = mine.manual ? "chosen by hand" : `default for ${sdk.sports.name(mine.sport)}`;
         const chips = mine.gear.length
-          ? mine.gear.map((g) => `<span class="badge gr-chip">${kindIcon(g.kind)} ${esc(g.name)}</span>`).join(" ")
-          : '<span class="muted">No gear</span>';
-        const how = mine.manual ? "Chosen by hand" : `Default for ${esc(sdk.sports.name(mine.sport))}`;
-        el.innerHTML = `<div class="gr-card"><div class="gr-chips">${chips}</div>
-          <div class="gr-actions"><span class="gr-small muted">${how}</span>
-            <button type="button" class="btn small" data-act="change">Change</button>
-            ${mine.manual ? '<button type="button" class="btn small" data-act="reset">Reset to defaults</button>' : ""}
-            <button type="button" class="btn small ghost" data-act="page">Manage gear</button></div></div>`;
+          ? mine.gear.map((g) => `<a class="gr-chip" href="#/m/gear" title="${esc(kindName(g.kind))} · ${esc(how)}">${kindIcon(g.kind)} ${esc(g.name)}</a>`).join("")
+          : '<span class="muted">none</span>';
+        el.innerHTML = `<div class="gr-line">${chips}
+          <button type="button" class="gr-link" data-act="change">${mine.gear.length ? "Change" : "Add"}</button>
+          ${mine.manual ? '<button type="button" class="gr-link" data-act="reset" title="Use the default gear of this sport">Reset</button>' : ""}</div>`;
       }
 
       el.addEventListener("submit", async (ev) => {
@@ -350,7 +349,6 @@
         const act = ev.target.closest("[data-act]")?.dataset.act;
         if (act === "change") { choosing = true; draw(); el.querySelector("input")?.focus(); }
         else if (act === "cancel") { choosing = false; draw(); }
-        else if (act === "page") sdk.navigate("#/m/gear");
         else if (act === "reset") {
           try { mine = await send(`/activity/${aid}/reset`, "POST"); draw(); sdk.toast("Gear reset to defaults"); }
           catch (e) { sdk.toast(e.message); }

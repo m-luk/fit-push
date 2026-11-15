@@ -26,8 +26,9 @@ sports (e.g. All cycling), and every new activity of that sport gets it automati
    filter, tick activities (click a row, **Shift**+click for a range, or the box in the
    header for all shown), pick an item and click **Add to selected**. Click **Gear** to
    go back to your items.
-6. On an activity page, the **Gear** card shows its gear. Click **Change**, tick the
-   items you used and click **Save**. **Reset to defaults** undoes a manual choice.
+6. On an activity page, the **Gear** line under the title shows its gear. Click
+   **Change** (or **Add**), tick the items you used and click **Save**. **Reset** undoes
+   a manual choice; click an item to open the **Gear** page.
 7. When an item is worn out, click **Retire**: it keeps its history but is no longer
    assigned automatically. **Unretire** brings it back; **Delete** (click twice) removes
    it and its history.

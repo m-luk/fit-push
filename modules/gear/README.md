@@ -50,8 +50,9 @@ Services for other modules (`ctx.service("gear", name)`, used by importers):
 Frontend: the **Gear** page (`#/m/gear`) lists items with totals and a limit bar, with
 forms to add/edit them and pick their defaults, and a **No gear** view (`?view=nogear`,
 `&sport=`) listing activities without gear with checkboxes to add an item to many at
-once; the **Gear** activity card shows and
-changes the gear of one activity (hidden while no gear exists).
+once. On activity pages a compact **Gear** line under the title and tags (an activity
+card with `placement: "header"`, SDK 1.2) shows the activity's gear as chips with
+**Change** / **Reset**; it is hidden while no gear exists.
 
 ## Data
 
