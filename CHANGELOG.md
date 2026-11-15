@@ -50,6 +50,9 @@ How to update it: see "Changelog" in `AGENTS.md`.
 
 ### Changed
 
+- The section tabs (Activities, Segments and module pages) moved from the sidebar to the
+  top bar next to the logo, with each page's icon beside its name; on narrow screens they
+  form their own scrollable row.
 - Renamed from fit-git to fit-push. Data from the old data directory (or the repository's
   `data/activities.db`) is copied on first start; `FITGIT_*` environment variables and
   saved browser preferences still work.

@@ -119,7 +119,7 @@ only `window.fitpush` plus the page globals `L` (Leaflet 1.9.4) and `Chart`
 
 | Call | Effect |
 |---|---|
-| `sdk.registerPage({module, id?, label, icon?, render(el, ctx)})` | adds a sidebar tab and the route `#/m/<id>` (`id` defaults to the module id) |
+| `sdk.registerPage({module, id?, label, icon?, render(el, ctx)})` | adds a tab to the navigation bar (next to the logo) and the route `#/m/<id>` (`id` defaults to the module id) |
 | `sdk.registerActivityCard({module, title, order?, render(el, ctx)})` | adds a card on every activity page (below the data streams). Return `false` from `render` to hide it for that activity. |
 
 `render` may be `async`. If it throws, the user sees an error box in your area and the

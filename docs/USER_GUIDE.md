@@ -113,7 +113,7 @@ matters, and one activity can have several efforts, for example one per lap.
 New uploads are matched automatically; **Rescan activities** re-checks
 everything.
 
-- The **Segments** tab (sidebar) lists all segments; a segment page shows its
+- The **Segments** tab (top navigation bar) lists all segments; a segment page shows its
   map, a **best efforts** leaderboard (fastest first) and the **activities**
   that contain it. Each time links to that effort in its activity.
 - On an activity, the **Segments** card lists its efforts with their rank

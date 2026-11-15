@@ -1255,9 +1255,19 @@
   }
 
   // Nav highlight; the sidebar shows segments on segment pages and activities everywhere else.
+  /** Narrow screens: scroll the navigation bar so the current tab is visible. */
+  function revealTab() {
+    const nav = $(".main-nav"), on = nav?.querySelector("a.active");
+    if (!nav || !on || nav.scrollWidth <= nav.clientWidth) return;
+    const r = on.getBoundingClientRect(), nr = nav.getBoundingClientRect();
+    nav.scrollLeft += r.left - nr.left - (nr.width - r.width) / 2;
+  }
+
   function setTab(tab) {
     state.tab = tab;
     document.querySelectorAll("[data-tab]").forEach((t) => t.classList.toggle("active", t.dataset.tab === tab));
+    revealTab();
+    document.fonts?.ready.then(revealTab);  // tab widths change once the web font is in
     $("#tab-activities").hidden = tab === "segments";
     $("#tab-segments").hidden = tab !== "segments";
   }
@@ -1479,10 +1489,10 @@
   }
 
   function renderNav() {
-    const nav = $(".side-tabs");
+    const nav = $(".main-nav");
     if (!nav) return;
     nav.innerHTML = `<a href="#/" data-tab="activities">Activities</a><a href="#/segments" data-tab="segments">Segments</a>` +
-      [...modulePages.values()].map((p) => `<a href="#/m/${esc(p.id)}" data-tab="page:${esc(p.id)}" title="${esc(p.label)} (module: ${esc(p.module)})">${esc(p.icon)} ${esc(p.label)}</a>`).join("");
+      [...modulePages.values()].map((p) => `<a href="#/m/${esc(p.id)}" data-tab="page:${esc(p.id)}" title="${esc(p.label)} (module: ${esc(p.module)})">${p.icon ? `<span class="nav-icon" aria-hidden="true">${esc(p.icon)}</span>` : ""}${esc(p.label)}</a>`).join("");
     setTab(state.tab || "activities");
   }
 

@@ -9,7 +9,7 @@ long ago). Clicking a route opens that activity.
 
 ## How to use
 
-1. Click **🗺️ Map** in the sidebar tabs (next to Activities and Segments).
+1. Click **🗺️ Map** in the navigation bar at the top (next to Activities and Segments).
 2. All routes appear, zoomed to fit. Hover a route to see its name, date and
    distance; it is highlighted. Click it to open the activity.
 3. **Sports**: click one or more sport chips to show only those sports. Click a

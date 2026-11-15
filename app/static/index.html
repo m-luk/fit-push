@@ -16,6 +16,9 @@
       <img src="/static/logo.svg" width="26" height="26" alt="">
       fit-push
     </a>
+    <nav class="main-nav" aria-label="Sections">
+      <a href="#/" data-tab="activities">Activities</a><a href="#/segments" data-tab="segments">Segments</a>
+    </nav>
     <div class="topbar-actions">
       <div class="seg" role="group" aria-label="Units">
         <button data-units="metric">km</button><button data-units="imperial">mi</button>
@@ -36,9 +39,6 @@
         <strong>Drop files here</strong>
         <span>.fit · .gpx · .tcx (also .gz)</span>
       </div>
-      <nav class="seg side-tabs" aria-label="Sections">
-        <a href="#/" data-tab="activities">Activities</a><a href="#/segments" data-tab="segments">Segments</a>
-      </nav>
       <div id="tab-activities" class="side-panel">
         <div class="filter-row">
           <select id="sport-filter" aria-label="Filter by sport"><option value="">All sports</option></select>
