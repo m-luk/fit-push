@@ -1,6 +1,6 @@
 [project]
 name = "fit-push"
-version = "0.4.0"
+version = "0.5.0"
 description = "Local web app to analyse and visualise sports activity files (FIT, GPX, TCX)"
 requires-python = ">=3.12"
 readme = "README.md"
