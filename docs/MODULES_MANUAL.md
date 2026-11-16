@@ -69,7 +69,12 @@ left out unless you change that.
 
 1. Open **Adventures** in the navigation bar. Under **Proposed adventures** each row
    shows the type, the dates, the number of days and activities and the distance.
-2. Click **Create** on a proposal, keep or change the name and click **Create** again.
+   Click **▸** at the start of a row to unfold it: you see its activities (each links to
+   the activity) and a small map; **Find place** shows the national park and the nearest
+   city.
+2. Click **Create** on a proposal. The name is proposed from OpenStreetMap as
+   `YYYY-MM Park, City` (for example `2026-07 Tatra National Park, Zakopane`), or from the
+   type and dates when no place is found. Keep or change it and click **Create** again.
    Click **Dismiss** to hide a proposal for good (**Show dismissed proposals again**
    brings dismissed ones back).
 3. To build one by hand, click **New adventure**, enter a name, then tick the activities
@@ -81,7 +86,8 @@ left out unless you change that.
    a row of the **Per day** table to focus the map on one day; **All days** shows
    everything again. Click a route to open the activity.
 5. Use the **Traverse** / **Multi-day** buttons to change the type, **Rename** to change
-   the name, **Edit activities** to add or remove activities, and **Delete** (click
+   the name, **Find place** to look up the park and city (and rename the adventure to
+   them if you like), **Edit activities** to add or remove activities, and **Delete** (click
    twice) to remove the adventure. Deleting an adventure keeps its activities.
 6. Click **Detection settings** on the Adventures page to change what is proposed:
    - **Max days without activity between days** (default 1): how many empty days may
@@ -95,13 +101,20 @@ left out unless you change that.
      training is not proposed. 0 turns it off.
    - **Excluded tags** (default `commute`) and **Sports that count** (none ticked = any
      sport).
+   - **Use OpenStreetMap for place names** (on by default): see Limitations.
 
-   Click **Save and detect** to apply, or **Restore defaults**.
+   Click **Save and detect** to apply (the settings close), or **Restore defaults**.
 7. On an activity page, the **Adventure** line under the title links to the adventures
    the activity belongs to, with its day number.
 
 ### Limitations
 
+- Place names come from OpenStreetMap. To find them, one point in the middle of the
+  route (rounded to about 100 m) is sent to the OpenStreetMap Overpass API, only when you
+  click **Create** on a proposal or **Find place**. Turn off **Use OpenStreetMap for place
+  names** in the detection settings to never send anything. The lookup needs an internet
+  connection and can take a few seconds; national parks are found when the route's
+  middle is inside one or within 25 km of its centre.
 - Detection needs GPS and a start time; activities without GPS can still be added by
   hand (they count in the totals but have no line on the map).
 - Days are calendar days of the recorded start time (UTC), so a late-evening activity

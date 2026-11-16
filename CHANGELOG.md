@@ -15,7 +15,10 @@ How to update it: see "Changelog" in `AGENTS.md`.
   fastest and slowest day, averages per day and per activity, and one map coloured by
   activity, by day or as a single total line. It proposes adventures automatically;
   sports, excluded tags (default `commute`), the allowed gap between days (default 1
-  day) and the traverse distance (default 10 km) can be changed.
+  day) and the traverse distance (default 10 km) can be changed. Proposals unfold to show
+  their activities on a small map. Adventures are named after the national park and nearest
+  city found on OpenStreetMap (`YYYY-MM Park, City`); this sends one rounded point of the
+  route on Create or **Find place** and can be switched off.
 
 ## [0.4.0] - 2026-11-16
 

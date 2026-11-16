@@ -58,3 +58,11 @@
   .adv-map { height: 55vh; }
   .adv-hl { grid-template-columns: 1fr 1fr; }
 }
+.adv-fold { font: inherit; font-size: 14px; background: none; border: 0; padding: 0 4px; cursor: pointer; color: var(--text-secondary); }
+.adv-fold:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.adv-unfold > td { background: var(--surface-2); white-space: normal; }
+.adv-unfold-body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+.adv-preview { height: 220px; border-radius: 8px; z-index: 0; }
+.adv-unfold-list .adv-table td { border-bottom-color: var(--border); }
+.adv-place { margin-top: 8px; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+@media (max-width: 640px) { .adv-unfold-body { grid-template-columns: 1fr; } }

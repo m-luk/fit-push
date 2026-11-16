@@ -5,8 +5,12 @@ Endpoints (under /api/m/adventures): see README.md, "How it works".
 
 from __future__ import annotations
 
+import itertools
 import json
 import math
+import os
+import urllib.parse
+import urllib.request
 from datetime import UTC, date, datetime
 from typing import Annotated, Literal
 
@@ -25,6 +29,7 @@ DEFAULTS: dict = {
     "base_radius_m": 2_000.0,  # multi-day: starts within this distance of the base
     "min_days": 2,
     "home_weeks": 8,  # a place with starts in this many different weeks is "home"; 0 = off
+    "osm_names": True,  # look up park / city names on OpenStreetMap (one rounded point per lookup)
 }
 
 
@@ -36,12 +41,14 @@ class SettingsIn(BaseModel):
     base_radius_m: float = Field(default=2_000.0, gt=0, le=100_000)
     min_days: int = Field(default=2, ge=1, le=60)
     home_weeks: int = Field(default=8, ge=0, le=1000)
+    osm_names: bool = True
 
 
 class AdventureIn(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     type: Literal["traverse", "multiday"] = "traverse"
     activity_ids: list[int] = Field(default_factory=list, max_length=1000)
+    place: dict | None = None  # a result of POST /place, kept with the adventure
 
 
 class AdventurePatch(BaseModel):
@@ -85,6 +92,73 @@ def stats(rows: list[dict]) -> dict:
     }
 
 
+# ---- OpenStreetMap place lookup (only on an explicit user click) ----------------------------
+OVERPASS_URL = "https://overpass-api.de/api/interpreter"  # FITPUSH_OVERPASS_URL overrides it
+PARK = "[boundary=national_park]"
+PARK2 = '[boundary=protected_area][protect_class="2"]'  # IUCN category II = national park
+
+
+def route_middle(lines: list[list]) -> list[float] | None:
+    """The point halfway along the joined lines, rounded to 3 decimals (~100 m)."""
+    pts = [p for line in lines for p in line]
+    if not pts:
+        return None
+    steps = [haversine(a, b) for a, b in itertools.pairwise(pts)]
+    half, run = sum(steps) / 2, 0.0
+    for i, s in enumerate(steps):
+        run += s
+        if run >= half:
+            pts = pts[i + 1 :]
+            break
+    return [round(pts[0][0], 3), round(pts[0][1], 3)]
+
+
+def overpass_place(point: list[float]) -> dict:
+    """National park (containing the point, else the nearest within 25 km) and the nearest
+    city or town (within 30 km, else village) from the Overpass API."""
+    lat, lon = point
+    near = f"(around:25000,{lat},{lon})"
+    query = (
+        f"[out:json][timeout:25];is_in({lat},{lon})->.a;(area.a{PARK};area.a{PARK2};);out tags;"
+        f"(relation{near}{PARK};way{near}{PARK};relation{near}{PARK2};);out tags center;"
+        f'node(around:30000,{lat},{lon})[place~"^(city|town|village)$"][name];out tags;'
+    )
+    req = urllib.request.Request(
+        os.environ.get("FITPUSH_OVERPASS_URL") or OVERPASS_URL,
+        data=urllib.parse.urlencode({"data": query}).encode(),
+        headers={"User-Agent": "fit-push"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            elements = json.loads(resp.read().decode("utf-8")).get("elements", [])
+    except (OSError, ValueError) as exc:
+        raise Invalid(f"OpenStreetMap lookup failed: {exc}") from exc
+
+    def name(e: dict) -> str:
+        tags = e.get("tags") or {}
+        return tags.get("name:en") or tags.get("name") or ""
+
+    park = None
+    inside = [e for e in elements if e.get("type") == "area" and name(e)]
+    if inside:
+        park = {"name": name(inside[0]), "inside": True, "distance_m": 0.0}
+    else:
+        parks = [
+            {"name": name(e), "inside": False, "distance_m": haversine(point, [e["center"]["lat"], e["center"]["lon"]])}
+            for e in elements
+            if e.get("type") in ("way", "relation") and e.get("center") and name(e)
+        ]
+        park = min(parks, key=lambda p: p["distance_m"], default=None)
+    places = [
+        {"name": name(e), "kind": e["tags"]["place"], "distance_m": haversine(point, [e["lat"], e["lon"]])}
+        for e in elements
+        if e.get("type") == "node" and "lat" in e and name(e)
+    ]
+    towns = [p for p in places if p["kind"] in ("city", "town")] or places
+    city = min(towns, key=lambda p: p["distance_m"], default=None)
+    return {"point": point, "park": park, "city": city}
+
+
 def register(ctx: ModuleContext) -> None:
     ctx.db.script(f"""
         CREATE TABLE IF NOT EXISTS {ctx.db.table("adventures")} (
@@ -94,10 +168,11 @@ def register(ctx: ModuleContext) -> None:
             adventure_id INTEGER NOT NULL, activity_id INTEGER NOT NULL, PRIMARY KEY (adventure_id, activity_id));
         CREATE INDEX IF NOT EXISTS {ctx.db.table("members_act")} ON {ctx.db.table("members")} (activity_id);
         CREATE TABLE IF NOT EXISTS {ctx.db.table("settings")} (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-        CREATE TABLE IF NOT EXISTS {ctx.db.table("dismissed")} (key TEXT PRIMARY KEY)
+        CREATE TABLE IF NOT EXISTS {ctx.db.table("dismissed")} (key TEXT PRIMARY KEY);
+        CREATE TABLE IF NOT EXISTS {ctx.db.table("places")} (adventure_id INTEGER PRIMARY KEY, value TEXT NOT NULL)
     """)
     adv_t, mem_t = ctx.db.table("adventures"), ctx.db.table("members")
-    set_t, dis_t = ctx.db.table("settings"), ctx.db.table("dismissed")
+    set_t, dis_t, pl_t = ctx.db.table("settings"), ctx.db.table("dismissed"), ctx.db.table("places")
 
     ends_cache: dict[int, tuple[list[float], list[float]] | None] = {}  # id -> (start, end); points never change
     tracks: dict[int, list] = {}
@@ -107,6 +182,7 @@ def register(ctx: ModuleContext) -> None:
         tracks.pop(activity_id, None)
         ctx.db.execute(f"DELETE FROM {mem_t} WHERE activity_id = ?", (activity_id,))
         ctx.db.execute(f"DELETE FROM {adv_t} WHERE id NOT IN (SELECT DISTINCT adventure_id FROM {mem_t})")
+        ctx.db.execute(f"DELETE FROM {pl_t} WHERE adventure_id NOT IN (SELECT id FROM {adv_t})")
 
     ctx.on("activity.deleted", on_deleted)
 
@@ -251,6 +327,9 @@ def register(ctx: ModuleContext) -> None:
                     "sports": sorted({r["sport"] for r in rows}),
                     "distance_m": sum(r["distance_m"] for r in rows),
                     "moving_s": sum(r["moving_s"] for r in rows),
+                    "activities": [
+                        {k: r[k] for k in ("id", "name", "sport", "start_time", "distance_m")} for r in rows
+                    ],
                 }
             )
         return sorted(out, key=lambda s: s["first_day"], reverse=True)
@@ -305,6 +384,8 @@ def register(ctx: ModuleContext) -> None:
         except NotFound:
             ctx.db.execute(f"DELETE FROM {adv_t} WHERE id = ?", (adv_id,))
             raise
+        if body.place:
+            store_place(adv_id, body.place)
         return detail(adv_id)
 
     @ctx.router.get("/adventures/{adv_id}")
@@ -338,6 +419,7 @@ def register(ctx: ModuleContext) -> None:
                 "shortest_day": min(days, key=lambda d: d["distance_m"])["date"] if len(days) > 1 else None,
                 "avg_per_day": {k: out[k] / n_days for k in keys},
                 "avg_per_activity": {k: out[k] / n_acts for k in keys},
+                "place": stored_place(adv_id),
             }
         )
         return out
@@ -360,7 +442,50 @@ def register(ctx: ModuleContext) -> None:
     def delete(adv_id: int) -> None:
         adventure(adv_id)
         ctx.db.execute(f"DELETE FROM {mem_t} WHERE adventure_id = ?", (adv_id,))
+        ctx.db.execute(f"DELETE FROM {pl_t} WHERE adventure_id = ?", (adv_id,))
         ctx.db.execute(f"DELETE FROM {adv_t} WHERE id = ?", (adv_id,))
+
+    # ---- places (OpenStreetMap) and preview tracks ---------------------------------------
+    def stored_place(adv_id: int) -> dict | None:
+        rows = ctx.db.query(f"SELECT value FROM {pl_t} WHERE adventure_id = ?", (adv_id,))
+        return json.loads(rows[0]["value"]) if rows else None
+
+    def store_place(adv_id: int, place: dict) -> None:
+        keep = {k: place.get(k) for k in ("point", "park", "city", "name")}
+        ctx.db.execute(f"INSERT OR REPLACE INTO {pl_t} (adventure_id, value) VALUES (?, ?)", (adv_id, json.dumps(keep)))
+
+    def lookup(ids: list[int]) -> dict:
+        """Park and city around the middle of the route; ``name`` = "YYYY-MM Park, City" (or None)."""
+        if not settings()["osm_names"]:
+            raise Invalid("OpenStreetMap lookups are switched off in the detection settings")
+        acts = {a["id"]: a for a in ctx.core.list_activities()}
+        rows = sorted((row(acts[i]) for i in ids if i in acts), key=lambda r: r["start_time"] or "")
+        point = route_middle([track(r["id"]) for r in rows if r["has_gps"]])
+        if point is None:
+            raise Invalid("none of these activities has GPS")
+        place = overpass_place(point)
+        names = [p["name"] for p in (place["park"], place["city"]) if p]
+        first = next((r["start_time"] for r in rows if r["start_time"]), None)
+        place["name"] = f"{first[:7]} {', '.join(names)}" if names and first else (", ".join(names) or None)
+        return place
+
+    @ctx.router.post("/place")
+    def find_place(body: MembersIn) -> dict:
+        return lookup(body.activity_ids)
+
+    @ctx.router.post("/adventures/{adv_id}/place")
+    def find_adventure_place(adv_id: int) -> dict:
+        adventure(adv_id)
+        place = lookup(member_ids(adv_id))
+        store_place(adv_id, place)
+        return place
+
+    @ctx.router.get("/tracks")
+    def preview_tracks(ids: str = "") -> list[dict]:
+        """GPS lines of the given activity ids (comma-separated), for proposal previews."""
+        want = [int(i) for i in ids.split(",") if i.strip().isdigit()][:200]
+        known = {a["id"]: a for a in ctx.core.list_activities()}
+        return [{"id": i, "track": track(i)} for i in want if i in known and known[i]["summary"].get("has_gps")]
 
     # ---- pickers and the activity page ---------------------------------------------------
     @ctx.router.get("/activities")

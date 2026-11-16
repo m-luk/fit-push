@@ -1,5 +1,6 @@
 """Tests for the adventures module. Run: python -m pytest modules/adventures -q"""
 
+import json
 from datetime import timedelta
 
 from tests.helpers import upload
@@ -154,3 +155,90 @@ def test_module_is_isolated(make_client):
     status = {m["id"]: m["status"] for m in client.get("/api/modules").json()}
     assert status["adventures"] == "loaded"
     assert client.get("/m/adventures/frontend.js").status_code == 200
+
+
+class FakeOverpass:
+    """A local stand-in for the Overpass API: records queries, answers with canned elements."""
+
+    def __init__(self, elements):
+        import http.server
+        import threading
+
+        self.queries: list[str] = []
+        fake = self
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_POST(self):
+                from urllib.parse import parse_qs
+
+                body = self.rfile.read(int(self.headers["Content-Length"])).decode()
+                fake.queries.append(parse_qs(body)["data"][0])
+                data = json.dumps({"elements": elements}).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(data)
+
+            def log_message(self, format, *args):
+                pass
+
+        self.server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=self.server.serve_forever, daemon=True).start()
+        self.url = f"http://127.0.0.1:{self.server.server_port}/api/interpreter"
+
+
+PARK_INSIDE = {
+    "type": "area",
+    "id": 1,
+    "tags": {"name": "Kampinoski Park Narodowy", "name:en": "Kampinos National Park"},
+}
+CITY = {"type": "node", "id": 2, "lat": 52.26, "lon": 21.01, "tags": {"name": "Warszawa", "place": "city"}}
+VILLAGE = {"type": "node", "id": 3, "lat": 52.25, "lon": 21.012, "tags": {"name": "Wieś", "place": "village"}}
+PARK_NEAR = {"type": "relation", "id": 4, "center": {"lat": 52.4, "lon": 21.0}, "tags": {"name": "Far Park"}}
+
+
+def test_place_lookup_names_the_trip(make_client, monkeypatch):
+    fake = FakeOverpass([PARK_INSIDE, CITY, VILLAGE])
+    monkeypatch.setenv("FITPUSH_OVERPASS_URL", fake.url)
+    client = make_client(modules="adventures")
+    ids = traverse(client)
+    place = client.post(f"{API}/place", json={"activity_ids": ids}).json()
+    assert place["name"] == "2026-11 Kampinos National Park, Warszawa"  # a city beats a closer village
+    assert place["park"]["inside"] and place["city"]["name"] == "Warszawa"
+    lat, lon = place["point"]
+    assert (round(lat, 3), round(lon, 3)) == (lat, lon)  # only a rounded point leaves the machine
+    assert len(fake.queries) == 1 and f"is_in({lat},{lon})" in fake.queries[0]
+    adv = client.post(f"{API}/adventures", json={"name": place["name"], "activity_ids": ids, "place": place}).json()
+    assert adv["place"]["park"]["name"] == "Kampinos National Park"
+    assert client.post(f"{API}/adventures/{adv['id']}/place").json()["name"] == place["name"]
+
+
+def test_place_lookup_nearest_park_and_switch_off(make_client, monkeypatch):
+    fake = FakeOverpass([PARK_NEAR, VILLAGE])
+    monkeypatch.setenv("FITPUSH_OVERPASS_URL", fake.url)
+    client = make_client(modules="adventures")
+    ids = traverse(client)
+    place = client.post(f"{API}/place", json={"activity_ids": ids}).json()
+    assert place["park"]["name"] == "Far Park" and not place["park"]["inside"] and place["park"]["distance_m"] > 1000
+    assert place["name"] == "2026-11 Far Park, Wieś"
+    client.put(f"{API}/settings", json={"osm_names": False})
+    assert client.post(f"{API}/place", json={"activity_ids": ids}).status_code == 422
+    assert len(fake.queries) == 1
+
+
+def test_place_lookup_errors(make_client, monkeypatch):
+    monkeypatch.setenv("FITPUSH_OVERPASS_URL", "http://127.0.0.1:9/nothing-listens-here")
+    client = make_client(modules="adventures")
+    ids = traverse(client, days=(0, 1))
+    r = client.post(f"{API}/place", json={"activity_ids": ids})
+    assert r.status_code == 422 and "OpenStreetMap" in r.json()["detail"]
+    assert client.post(f"{API}/place", json={"activity_ids": [9999]}).status_code == 422  # no GPS to look up
+
+
+def test_suggestion_details_and_preview_tracks(make_client):
+    client = make_client(modules="adventures")
+    ids = traverse(client)
+    s = client.get(f"{API}/suggestions").json()[0]
+    assert [a["id"] for a in s["activities"]] == ids and s["activities"][0]["name"] == "Ride"
+    lines = client.get(f"{API}/tracks?ids={','.join(map(str, ids))},9999,x").json()
+    assert [t["id"] for t in lines] == ids and all(len(t["track"]) > 10 for t in lines)
