@@ -33,7 +33,9 @@ DEFAULT_DIR = ROOT / "modules"
 ID_RE = re.compile(r"^[a-z][a-z0-9_]{1,31}$")
 GITHUB_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$")
 SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+$")
-PROVIDES = {"page", "activity-card", "api", "events"}
+PROVIDES = {"page", "activity-card", "api", "events", "service"}
+SERVICE_NAME_RE = re.compile(r"^[a-z][a-z0-9_]{0,31}$")
+SERVICE_VERSION_RE = re.compile(r"^\d+\.\d+$")  # MAJOR.MINOR of one service (docs/SDK.md, "Services")
 REQUIRED_DOCS = ("README.md", "MANUAL.md")
 FRONTEND_FILES = ("frontend.js", "frontend.css")
 
@@ -64,6 +66,8 @@ class ModuleInfo:
             "owner": m.get("owner"),
             "maintainers": m.get("maintainers", []),
             "provides": m.get("provides", []),
+            "services": m.get("services", {}),
+            "uses": m.get("uses", {}),
             "status": self.status,
             "errors": self.errors,
             "frontend": self.status == "loaded" and self.frontend,
@@ -99,11 +103,37 @@ def validate_manifest(manifest: dict, folder: Path) -> list[str]:
         errs.append(f"provides must list some of {sorted(PROVIDES)}")
     if not isinstance(manifest.get("depends", []), list):
         errs.append("depends must be a list of module ids")
+    errs += _validate_services(manifest)
     for doc in REQUIRED_DOCS:
         if not (folder / doc).is_file():
             errs.append(f"{doc} is missing")
     if not (folder / "backend.py").is_file() and not (folder / "frontend.js").is_file():
         errs.append("a module needs backend.py and/or frontend.js")
+    return errs
+
+
+def _validate_services(manifest: dict) -> list[str]:
+    """``services`` (what a service module offers, with versions) and ``uses`` (what a
+    module calls in others, with the major version it was written for)."""
+    errs = []
+    services, uses = manifest.get("services", {}), manifest.get("uses", {})
+    if not isinstance(services, dict) or not all(
+        isinstance(k, str) and SERVICE_NAME_RE.match(k) and SERVICE_VERSION_RE.match(str(v))
+        for k, v in services.items()
+    ):
+        errs.append('services must map service names to "MAJOR.MINOR" versions, e.g. {"ensure": "1.0"}')
+    elif ("service" in manifest.get("provides", [])) != bool(services):
+        errs.append('a module that provides "service" must declare its "services", and only such a module may')
+    ok = isinstance(uses, dict) and all(
+        isinstance(mid, str)
+        and ID_RE.match(mid)
+        and isinstance(names, dict)
+        and names
+        and all(isinstance(k, str) and SERVICE_NAME_RE.match(k) and type(v) is int and v >= 0 for k, v in names.items())
+        for mid, names in uses.items()
+    )
+    if not ok:
+        errs.append('uses must map module ids to {service: major version}, e.g. {"gear": {"ensure": 1}}')
     return errs
 
 
@@ -144,7 +174,9 @@ def load_modules(app: FastAPI, core: Core, spec: str | None = None, directory: P
 
     loaded: set[str] = set()
     services: dict = {}  # module id -> {name: fn}, shared by every ModuleContext
+    versions: dict = {}  # module id -> {name: "MAJOR.MINOR"} of the services actually provided
     app.state.module_services = services
+    app.state.module_service_versions = versions
     for info in _dependency_order([i for i in infos if i.id in wanted]):
         if info.status == "error":
             continue
@@ -152,7 +184,7 @@ def load_modules(app: FastAPI, core: Core, spec: str | None = None, directory: P
         if missing:
             info.status, info.errors = "error", [f"depends on modules that are not loaded: {', '.join(missing)}"]
             continue
-        if _register(app, core, info, services):
+        if _register(app, core, info, services, versions):
             loaded.add(info.id)
     for info in infos:
         if info.status == "available":
@@ -179,7 +211,7 @@ def _dependency_order(infos: list[ModuleInfo]) -> list[ModuleInfo]:
     return order
 
 
-def _register(app: FastAPI, core: Core, info: ModuleInfo, services: dict) -> bool:
+def _register(app: FastAPI, core: Core, info: ModuleInfo, services: dict, versions: dict) -> bool:
     backend = info.dir / "backend.py"
     if backend.is_file():
         router = APIRouter(prefix=f"/api/m/{info.id}", tags=[f"module: {info.id}"])
@@ -192,6 +224,7 @@ def _register(app: FastAPI, core: Core, info: ModuleInfo, services: dict) -> boo
             router=router,
             _on=lambda ev, fn, _id=info.id: core.events.on(ev, fn, owner=_id),
             _services=services,
+            _versions=versions,
         )
         try:
             spec = importlib.util.spec_from_file_location(f"fitpush_modules.{info.id}", backend)
@@ -207,6 +240,7 @@ def _register(app: FastAPI, core: Core, info: ModuleInfo, services: dict) -> boo
             log.exception("module %s failed to load", info.id)
             core.events.off_owner(info.id)
             services.pop(info.id, None)
+            versions.pop(info.id, None)
             info.status, info.errors = "error", [f"{type(exc).__name__}: {exc}"]
             return False
         app.include_router(router)

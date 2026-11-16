@@ -10,6 +10,29 @@ How to update it: see "Changelog" in `AGENTS.md`.
 
 ### Added
 
+- **Adventures** module: group activities into traverses (chained tracks) and multi-day
+  trips (outings from one base on consecutive days), with totals, a per-day table, the
+  fastest and slowest day, averages per day and per activity, and one map coloured by
+  activity, by day or as a single total line. It proposes adventures automatically;
+  sports, excluded tags (default `commute`), the allowed gap between days (default 1
+  day) and the traverse distance (default 1 km) can be changed. Proposals unfold to show
+  their activities on a small map, and **Detect again** runs detection once more. Saved
+  adventures show at once while detection runs in the background; deleting an adventure
+  lets its activities be proposed again. A traverse must be one continuous line (each
+  start within 1 km of the previous end, mostly point-to-point); other trips are
+  multi-day. Tiles show the highest point, the longest day and the biggest climb, and the
+  map can also be coloured by elevation, speed or heart rate. **⚙ Customize** picks and
+  orders the tiles like on an activity, as the default for traverses or multi-day trips
+  or just for one adventure. Multi-day trips are found across a whole area (default 20 km,
+  for example hikes from neighbouring valleys), and everyday training near home (a spot
+  used in 15+ weeks) is left out.
+- Module developers: **service modules** (`--provides service`) and versioned services
+  (SDK 1.3). Providers declare `services` with versions and document them in a README
+  `## Services` section; consumers declare `uses` with the major version they need and
+  get `None` from `ctx.service()` for another major (`ctx.service_version()` is new).
+  `scripts/modules.py check` cross-checks both sides, the registry lists them, and the
+  **Modules** page shows each module's services and uses. The service change workflow is
+  in docs/SDK.md.
 - Skiing: lift rides and runs are recognised. A **Runs & lifts** card compares them
   (count, time, distance, vertical, vertical rate, speed, heart rate, longest run) and
   lists every run and lift ride; click one to select it on the charts and map. The map
@@ -25,6 +48,8 @@ How to update it: see "Changelog" in `AGENTS.md`.
 
 ### Changed
 
+- **Gear** module: its services for importers (`ensure`, `assign`, `add_defaults`) are
+  declared as version 1.0; **Strava import** declares that it uses them.
 - `python scripts/run.py` starts fit-push like the desktop app: in its own window with the
   fit-push icon, opened as soon as the server is ready. Closing the window stops the
   server, and stopping the server closes the window. `--no-desktop` runs only the server

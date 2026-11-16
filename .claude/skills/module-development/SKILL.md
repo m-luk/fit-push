@@ -33,8 +33,10 @@ Split when the description needs "and also": two small modules beat one big one.
    ```bash
    python scripts/modules.py new <id> --owner <github-id> --name "Readable name" --provides page,api
    ```
-   `--provides` is any of `page`, `activity-card`, `api`, `events`; the unneeded
-   template files are removed.
+   `--provides` is any of `page`, `activity-card`, `api`, `events`, `service`; the
+   unneeded template files are removed. `--provides service` alone makes a **service
+   module** (no UI, no routes; only versioned services for other modules). Use one for a
+   capability several modules need and for anything that talks to an external service.
 2. **Write `README.md` first.** It holds the intent: `## Intent` (problem, for whom,
    why a module), `## How it works` (endpoints `/api/m/<id>/...`, events, UI hooks) and
    `## Data` (what it reads and stores). Fill in `module.json` `summary`. If you can't
@@ -69,6 +71,15 @@ Split when the description needs "and also": two small modules beat one big one.
    and at 390 px.
 9. **Commit** only your module folder plus the regenerated `modules/INDEX.md` and
    `docs/MODULES_MANUAL.md`.
+
+## Services between modules
+
+Read docs/SDK.md, "Services between modules", "Module kinds" and "Service API workflow".
+In short: the provider declares `"services": {"name": "1.0"}`, calls `ctx.provide`, and
+documents each `` `name(args) -> result` `` under `## Services` in its README. The
+consumer declares `"uses": {"provider": {"name": 1}}`, calls `ctx.service(...)` when
+needed and handles `None`. Minor bump for additions, major for breaking changes (and
+update every consumer in the same change). `modules.py check` fails on any mismatch.
 
 ## Changing an existing module
 

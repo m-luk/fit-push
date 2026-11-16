@@ -27,8 +27,16 @@ machine-checkable ones, and CI runs it.
    nothing from `app` except `app.sdk`; frontend uses `window.fitpush` (and the
    globals `L`, `Chart`). Need more? Open a separate **core** change that extends the
    SDK (with tests and docs), then use it. Never patch core files in a module change.
-4. **No dependencies on other modules** unless unavoidable. If you must, list them in
-   `"depends"`; the module is then switched off when a dependency is missing.
+4. **No dependencies on other modules** unless unavoidable. Modules work together only
+   through **versioned services** (docs/SDK.md, "Services between modules"): the
+   provider declares them in `"services"` and documents them in a README `## Services`
+   section; the consumer declares what it calls in `"uses"` (with the major version) and
+   copes with `None` when the provider is missing. A hard dependency also goes in
+   `"depends"`; the module is then switched off when a dependency is missing. A
+   capability several modules need (above all, anything that talks to an external
+   service) lives **once**, in a **service module**: `"provides": ["service"]`, no page,
+   no card, no HTTP API (docs/SDK.md, "Module kinds"). Changes to a service follow the
+   "Service API workflow" there: minor for additions, major for anything that breaks.
 5. **No new Python packages.** Modules may use the standard library plus `fastapi`,
    `pydantic`, `numpy`. Frontend: no external scripts beyond what the page loads.
 
@@ -80,6 +88,7 @@ machine-checkable ones, and CI runs it.
 
 ```bash
 python scripts/modules.py new <id> --owner <github-id> --name "Readable name" --provides page,api
+python scripts/modules.py new <id> --owner <github-id> --name "Readable name" --provides service  # a service module
 ```
 
 Then follow the **module-development** skill (`.claude/skills/module-development/SKILL.md`).

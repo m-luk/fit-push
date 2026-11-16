@@ -1,0 +1,528 @@
+// Adventures (frontend): registers the "Adventures" page (#/m/adventures, one adventure at ?id=<id>)
+// and a header line on activity pages. Uses only window.fitpush.
+(() => {
+  "use strict";
+  const sdk = window.fitpush;
+  const esc = sdk.esc;
+  const API = "/api/m/adventures";
+  const TYPES = { traverse: ["🧭", "Traverse"], multiday: ["🏕️", "Multi-day"] };
+  const typeBadge = (t) => `<span class="badge adv-type">${(TYPES[t] || TYPES.traverse)[0]} ${esc((TYPES[t] || TYPES.traverse)[1])}</span>`;
+  const send = (path, method = "GET", body) => sdk.api(`${API}${path}`, {
+    method, headers: body === undefined ? undefined : { "Content-Type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const U = () => sdk.fmt.units();
+  const unitM = () => (U().distL === "mi" ? 1609.344 : 1000);
+  const day = (iso) => (iso ? sdk.fmt.day(`${iso.slice(0, 10)}T12:00:00`) : "–"); // a calendar day, not a UTC instant
+  const span = (a, b) => (a === b ? day(a) : `${day(a)} – ${day(b)}`);
+  const dist = (m, d = 1) => `${esc(sdk.fmt.dist(m || 0, d))} ${U().distL}`;
+  const plural = (n, w, pl = `${w}s`) => `${n} ${n === 1 ? w : pl}`;
+  const nActs = (n) => plural(n, "activity", "activities");
+  // Speed or pace: pace only when every sport of the adventure is a pace sport.
+  const speedFmt = (sports) => (sports.length && sports.every((s) => sdk.sports.isPace(s))
+    ? { f: (ms) => sdk.fmt.pace(ms), unit: `/${U().distL}`, label: "Avg pace" }
+    : { f: (ms) => sdk.fmt.speed(ms), unit: U().speedL, label: "Avg speed" });
+  const sportIcons = (sports) => sports.map((s) => `<span title="${esc(sdk.sports.name(s))}">${esc(sdk.sports.icon(s))}</span>`).join("");
+  // Colours for n ordered items (activities or days): categorical up to 8, then a sequential ramp.
+  function palette(n) {
+    if (n <= 8) return Array.from({ length: n }, (_, i) => sdk.css(`--cat-${i + 1}`));
+    const ramp = [1, 2, 3, 4, 5, 6, 7].map((i) => sdk.css(`--ov-${i}`));
+    return Array.from({ length: n }, (_, i) => ramp[Math.round((i / (n - 1)) * 6)]);
+  }
+
+  sdk.registerPage({
+    module: "adventures",
+    label: "Adventures",
+    icon: "🧭",
+    async render(el, ctx) {
+      const id = +ctx.params.get("id");
+      return id ? renderAdventure(el, ctx, id) : renderList(el, ctx);
+    },
+  });
+
+  // ---- list: proposals, adventures, settings --------------------------------------------------
+  async function renderList(el, ctx) {
+    el.innerHTML = `
+      <div class="page-head"><div><h1>Adventures</h1><div class="sub" id="adv-sub">Loading…</div></div>
+        <div class="adv-actions"><button type="button" class="btn" id="adv-detect" title="Look for adventures in your activities again">Detect again</button>
+          <button type="button" class="btn" id="adv-settings-btn" aria-expanded="false">Detection settings</button>
+          <button type="button" class="btn primary" id="adv-new">New adventure</button></div></div>
+      <div id="adv-settings" hidden></div>
+      <div class="adv-grid" id="adv-list"></div>
+      <div id="adv-sugg"></div>`;
+    const $ = (s) => el.querySelector(s);
+    let sugg = null, advs = [], cfg = null, seq = 0; // sugg: null while detection runs
+    const open = new Set(); // expanded proposal keys
+
+    // Saved adventures show at once; detection follows in the background.
+    async function load() {
+      const mine = ++seq;
+      [advs, cfg] = await Promise.all([send("/adventures"), send("/settings")]);
+      if (ctx.isStale() || mine !== seq) return;
+      sugg = null;
+      drawList(); drawSugg(); drawSettings();
+      const found = await send("/suggestions").catch((e) => { sdk.toast(`Detection failed: ${e.message}`); return []; });
+      if (ctx.isStale() || mine !== seq) return;
+      sugg = found;
+      drawList(); drawSugg();
+    }
+
+    function drawList() {
+      $("#adv-sub").textContent = advs.length ? `${plural(advs.length, "adventure")}` : "Group trips: traverses and multi-day stays.";
+      $("#adv-list").innerHTML = advs.map((a) => `<a class="card adv-card" href="#/m/adventures?id=${a.id}">
+          <div class="adv-card-head"><h3>${esc(a.name)}</h3>${typeBadge(a.type)}</div>
+          <div class="muted adv-small">${a.first_day ? esc(span(a.first_day, a.last_day)) : "No activities yet"}</div>
+          <div class="adv-card-stats"><span><b>${dist(a.distance_m)}</b></span><span>${plural(a.days, "day")}</span>
+            <span>${esc(sdk.fmt.dur(a.moving_s))}</span><span>${sportIcons(a.sports)}</span></div></a>`).join("")
+        || (sugg && !sugg.length ? '<div class="card muted">No adventures yet. Use <b>New adventure</b>, or create one from a proposal.</div>' : "");
+    }
+
+    function drawSugg() {
+      if (!sugg) {
+        $("#adv-sugg").innerHTML = '<div class="card muted adv-empty" role="status"><span class="adv-spin" aria-hidden="true"></span> Looking for adventures in your activities…</div>';
+        return;
+      }
+      $("#adv-sugg").innerHTML = sugg.length ? `<div class="card adv-sugg"><h2><span>Proposed adventures</span><span class="muted">${plural(sugg.length, "proposal")}</span></h2>
+        <div class="table-scroll"><table class="adv-table"><tbody>${sugg.map((s) => `<tr data-key="${esc(s.key)}">
+          <td><button type="button" class="adv-fold" data-act="fold" aria-expanded="${open.has(s.key)}" aria-label="Show the activities of this proposal">${open.has(s.key) ? "▾" : "▸"}</button> ${typeBadge(s.type)}</td><td>${esc(span(s.first_day, s.last_day))}</td>
+          <td>${plural(s.days, "day")} · ${nActs(s.activity_ids.length)}</td>
+          <td class="num">${dist(s.distance_m)}</td><td>${sportIcons(s.sports)}</td>
+          <td class="adv-row-actions"><button type="button" class="btn small primary" data-act="accept">Create</button>
+            <button type="button" class="btn small ghost" data-act="dismiss">Dismiss</button></td></tr>${open.has(s.key) ? unfolded(s) : ""}`).join("")}</tbody></table></div></div>`
+        : `<div class="card muted adv-empty">No new proposals. Detection looks for chained tracks (traverses) and outings from one base on consecutive days. <button type="button" class="adv-link" id="adv-undismiss">Show dismissed proposals again</button></div>`;
+      drawPreviews();
+    }
+
+    // an unfolded proposal: its activities and a small map
+    function unfolded(s) {
+      return `<tr class="adv-unfold" data-key="${esc(s.key)}"><td colspan="6"><div class="adv-unfold-body">
+        <div class="adv-preview" data-preview="${esc(s.key)}"></div>
+        <div class="adv-unfold-list"><table class="adv-table"><tbody>${s.activities.map((a) => `<tr><td>${esc(day(a.start_time))}</td>
+          <td>${esc(sdk.sports.icon(a.sport))} <a href="#/activity/${a.id}">${esc(a.name)}</a></td><td class="num">${dist(a.distance_m)}</td></tr>`).join("")}</tbody></table></div></div></td></tr>`;
+    }
+
+    async function drawPreviews() {
+      // old preview maps left the page with their rows; sdk.map() disposes them on navigation
+      for (const box of el.querySelectorAll("[data-preview]")) {
+        const s = sugg.find((x) => x.key === box.dataset.preview);
+        const lines = await send(`/tracks?ids=${s.activity_ids.join(",")}`);
+        if (ctx.isStale() || !box.isConnected) return;
+        const map = sdk.map(box);
+        const colors = palette(lines.length), casing = sdk.css("--map-casing");
+        let bounds = null;
+        lines.forEach((t, i) => {
+          L.polyline(t.track, { color: casing, weight: 5, opacity: 0.6, interactive: false }).addTo(map);
+          const l = L.polyline(t.track, { color: colors[i], weight: 3 }).addTo(map);
+          bounds = bounds ? bounds.extend(l.getBounds()) : l.getBounds();
+        });
+        if (bounds) map.fitBounds(bounds, { padding: [12, 12], animate: false });
+      }
+    }
+
+    function drawSettings() {
+      const m = unitM(), u = U().distL;
+      const want = new Set(cfg.sports);
+      $("#adv-settings").innerHTML = `<form class="card adv-form" id="adv-cfg"><h2><span>Detection settings</span></h2>
+        <div class="adv-fields">
+          <label>Max days without activity between days <input name="max_gap_days" type="number" min="0" max="30" step="1" value="${cfg.max_gap_days}"></label>
+          <label>Traverse: each start within (${u}) of the previous end <input name="traverse_link_m" type="number" min="0.05" step="0.05" value="${+(cfg.traverse_link_m / m).toFixed(2)}"></label>
+          <label>Same area: a start within (${u}) of the trip so far <input name="area_radius_m" type="number" min="0.1" step="0.5" value="${+(cfg.area_radius_m / m).toFixed(2)}"></label>
+          <label>Same spot: a loop ends within (${u}) of its start <input name="base_radius_m" type="number" min="0.1" step="0.1" value="${+(cfg.base_radius_m / m).toFixed(2)}"></label>
+          <label>Minimum days <input name="min_days" type="number" min="1" max="60" step="1" value="${cfg.min_days}"></label>
+          <label>Home: a spot used in this many weeks (0 = off) <input name="home_weeks" type="number" min="0" step="1" value="${cfg.home_weeks}"></label>
+          <label>Home: skip activities starting and ending within (${u}) of it <input name="home_radius_m" type="number" min="0" step="0.5" value="${+(cfg.home_radius_m / m).toFixed(2)}"></label>
+          <label>Excluded tags (comma-separated) <input name="exclude_tags" value="${esc(cfg.exclude_tags.join(", "))}" placeholder="commute"></label>
+        </div>
+        <fieldset class="adv-sports"><legend>Sports that count <span class="muted adv-small">none ticked = any sport, mixed adventures allowed</span></legend>
+          ${sdk.sports.list().map((s) => `<label class="adv-check"><input type="checkbox" name="sport" value="${esc(s.key)}"${want.has(s.key) ? " checked" : ""}> ${esc(s.icon)} ${esc(s.label)}</label>`).join("")}</fieldset>
+        <div class="adv-actions"><button type="submit" class="btn primary small">Save and detect</button>
+          <button type="button" class="btn small" id="adv-cfg-defaults">Restore defaults</button></div></form>`;
+    }
+
+    async function saveSettings(f) {
+      const m = unitM(), v = (n) => f.elements[n].value;
+      const body = {
+        max_gap_days: +v("max_gap_days"), min_days: +v("min_days"), home_weeks: +v("home_weeks"),
+        traverse_link_m: +v("traverse_link_m") * m, base_radius_m: +v("base_radius_m") * m,
+        area_radius_m: +v("area_radius_m") * m, home_radius_m: +v("home_radius_m") * m,
+        exclude_tags: v("exclude_tags").split(",").map((t) => t.trim()).filter(Boolean),
+        sports: [...f.querySelectorAll("[name=sport]:checked")].map((c) => c.value),
+      };
+      try {
+        await send("/settings", "PUT", body); sdk.toast("Settings saved");
+        $("#adv-settings").hidden = true; $("#adv-settings-btn").setAttribute("aria-expanded", "false");
+        await load();
+      } catch (e) { sdk.toast(`Could not save: ${e.message}`); }
+    }
+
+    el.addEventListener("submit", (ev) => { ev.preventDefault(); saveSettings(ev.target); });
+    el.addEventListener("click", async (ev) => {
+      const t = ev.target;
+      try {
+        if (t.closest("#adv-detect")) {
+          const b = t.closest("button");
+          b.disabled = true;
+          try { await load(); } finally { b.disabled = false; }
+          if (!ctx.isStale() && sugg) sdk.toast(sugg.length ? `${plural(sugg.length, "proposal")} found` : "No new proposals");
+        } else if (t.closest("#adv-settings-btn")) {
+          const box = $("#adv-settings"); box.hidden = !box.hidden;
+          t.closest("button").setAttribute("aria-expanded", String(!box.hidden));
+        } else if (t.closest("#adv-cfg-defaults")) {
+          const { defaults } = cfg; await send("/settings", "PUT", defaults); sdk.toast("Defaults restored"); await load();
+        } else if (t.closest("#adv-undismiss")) {
+          const r = await send("/suggestions/reset", "POST"); sdk.toast(`${plural(r.restored, "proposal")} restored`); await load();
+        } else if (t.closest("#adv-new")) {
+          const name = await sdk.askName("New adventure", "Name the trip; add its activities next.", "", "Create");
+          if (!name) return;
+          const a = await send("/adventures", "POST", { name, type: "traverse", activity_ids: [] });
+          sdk.navigate(`#/m/adventures?id=${a.id}&edit=1`);
+        } else if (t.closest("[data-act]")) {
+          const s = sugg.find((x) => x.key === t.closest("[data-key]").dataset.key), act = t.closest("[data-act]").dataset.act;
+          if (!s) return;
+          if (act === "dismiss") { open.delete(s.key); await send("/suggestions/dismiss", "POST", { key: s.key }); await load(); return; }
+          if (act === "fold") { open.has(s.key) ? open.delete(s.key) : open.add(s.key); drawSugg(); return; }
+          const fallback = `${TYPES[s.type][1]} ${span(s.first_day, s.last_day)}`;
+          const name = await sdk.askName(`Create ${TYPES[s.type][1].toLowerCase()} adventure`, `${span(s.first_day, s.last_day)} · ${nActs(s.activity_ids.length)}`, fallback, "Create");
+          if (!name) return;
+          const a = await send("/adventures", "POST", { name, type: s.type, activity_ids: s.activity_ids });
+          sdk.navigate(`#/m/adventures?id=${a.id}`);
+        }
+      } catch (e) { sdk.toast(e.message); }
+    });
+    await load();
+  }
+
+  // ---- one adventure -------------------------------------------------------------------------
+  async function renderAdventure(el, ctx, id) {
+    let adv;
+    try { adv = await send(`/adventures/${id}`); } catch (e) {
+      if (ctx.isStale()) return;
+      el.innerHTML = `<div class="card"><p>${esc(e.message)}</p><a href="#/m/adventures">Back to adventures</a></div>`;
+      return;
+    }
+    if (ctx.isStale()) return;
+    const st = {
+      color: ["day", "total", "ele", "speed", "hr"].includes(ctx.params.get("color")) ? ctx.params.get("color") : "activity",
+      day: +ctx.params.get("day") || 0, editing: ctx.params.get("edit") === "1",
+    };
+    el.innerHTML = `
+      <div class="page-head"><div><a href="#/m/adventures" class="adv-back">← Adventures</a><h1 id="adv-title"></h1><div class="sub" id="adv-sub"></div></div>
+        <div class="adv-actions">
+          <span class="seg" role="group" aria-label="Adventure type">${Object.entries(TYPES).map(([k, [i, l]]) => `<button type="button" data-type="${k}">${i} ${l}</button>`).join("")}</span>
+          <button type="button" class="btn" id="adv-rename">Rename</button>
+          <button type="button" class="btn" id="adv-edit" aria-expanded="false">Edit activities</button>
+          <button type="button" class="btn danger" id="adv-delete">Delete</button></div></div>
+      <div id="adv-picker"></div>
+      <div class="tiles" id="adv-tiles"></div>
+      <div class="card adv-map-card">
+        <div class="adv-map-bar"><span class="adv-small muted">Colour by</span>
+          <span class="seg" role="group" aria-label="Colour by"><button type="button" data-color="activity">Activity</button><button type="button" data-color="day">Day</button><button type="button" data-color="total">Total</button></span>
+          <span class="seg" role="group" aria-label="Colour by a measure"><button type="button" data-color="ele">Elevation</button><button type="button" data-color="speed" id="adv-speed-btn">Speed</button><button type="button" data-color="hr">Heart rate</button></span>
+          <span class="adv-days" id="adv-days" role="group" aria-label="Show day"></span></div>
+        <div id="adv-map" class="adv-map"></div></div>
+      <div class="card adv-perday-card"><h2><span>Per day</span><span class="muted adv-small">click a day to show it on the map</span></h2><div class="table-scroll" id="adv-perday"></div></div>
+      <div class="card"><h2><span>Activities</span></h2><div class="table-scroll" id="adv-acts"></div></div>
+      <dialog class="wide adv-tiles-dialog" id="adv-tiles-dialog" aria-labelledby="adv-tiles-title"><form method="dialog">
+        <h2 id="adv-tiles-title">Adventure tiles</h2>
+        <p class="muted">Tick the tiles to show and use ↑ ↓ to order them. A tile without data is left out. <span id="adv-tiles-source"></span></p>
+        <ul class="tile-pick" id="adv-tile-pick"></ul>
+        <fieldset class="adv-tiles-scope"><legend>Save for</legend>
+          <label class="adv-check"><input type="radio" name="scope" value="adventure" checked> <span>this adventure only</span></label>
+          <label class="adv-check"><input type="radio" name="scope" value="type"> <span>every <b id="adv-tiles-type"></b> adventure (the default)</span></label></fieldset>
+        <div class="dialog-actions">
+          <button value="reset" class="btn ghost push-left" formnovalidate id="adv-tiles-reset">Reset</button>
+          <button value="cancel" class="btn ghost" formnovalidate>Cancel</button>
+          <button value="save" class="btn primary">Save</button></div></form></dialog>`;
+    const $ = (s) => el.querySelector(s);
+    const map = sdk.map($("#adv-map"));
+    const layer = L.layerGroup().addTo(map);
+    const legend = L.control({ position: "bottomleft" });
+    legend.onAdd = () => L.DomUtil.create("div", "map-legend adv-legend");
+    legend.addTo(map);
+    let pendingDelete = false, deleteTimer = null;
+    ctx.onCleanup(() => clearTimeout(deleteTimer));
+
+    const colors = () => {
+      const acts = adv.activity_list, days = adv.per_day;
+      const actC = new Map(acts.map((a, i) => [a.id, palette(acts.length)[i]]));
+      const dayC = new Map(days.map((d, i) => [d.day, palette(days.length)[i]]));
+      return { actC, dayC, of: (a) => (st.color === "total" ? sdk.css("--accent") : st.color === "day" ? dayC.get(a.day) : actC.get(a.id)) };
+    };
+
+    // colouring along the route by a measure, like the activity map: one-hue sequential ramp
+    const METRIC = {
+      ele: { label: "Elevation", f: (v) => `${esc(sdk.fmt.ele(v))} ${U().eleL}` },
+      speed: { label: "Speed", f: (v) => { const sp = speedFmt(adv.sports); return `${esc(sp.f(v))} ${esc(sp.unit)}`; } },
+      hr: { label: "Heart rate", f: (v) => `${Math.round(v)} bpm` },
+    };
+    const hasMetric = (k) => adv.activity_list.some((a) => a.values?.[k]?.some((v) => v != null));
+    function metricRange(k, acts) {
+      const vals = acts.flatMap((a) => a.values[k].filter((v) => v != null)).sort((x, y) => x - y);
+      if (!vals.length) return null;
+      const q = (p) => vals[Math.min(vals.length - 1, Math.floor(p * vals.length))];
+      return [q(0.02), q(0.98)]; // ignore the odd GPS / sensor spike at either end
+    }
+
+    function syncState() {
+      ctx.setParams({ id, color: st.color === "activity" ? "" : st.color, day: st.day || "", edit: st.editing ? "1" : "" });
+      el.querySelectorAll("[data-color]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.color === st.color)));
+      el.querySelectorAll("[data-color]").forEach((b) => b.classList.toggle("active", b.dataset.color === st.color));
+      for (const k of Object.keys(METRIC)) { const b = el.querySelector(`[data-color=${k}]`); b.disabled = !hasMetric(k); b.title = b.disabled ? "No data for this measure" : ""; }
+      $("#adv-speed-btn").textContent = speedFmt(adv.sports).label === "Avg pace" ? "Pace" : "Speed";
+      el.querySelectorAll("[data-type]").forEach((b) => { b.classList.toggle("active", b.dataset.type === adv.type); b.setAttribute("aria-pressed", String(b.dataset.type === adv.type)); });
+      el.querySelectorAll("[data-day]").forEach((b) => b.setAttribute("aria-pressed", String(+b.dataset.day === st.day)));
+    }
+
+    function draw() {
+      const sp = speedFmt(adv.sports);
+      $("#adv-title").textContent = adv.name;
+      $("#adv-sub").innerHTML = adv.first_day
+        ? `${typeBadge(adv.type)} ${esc(span(adv.first_day, adv.last_day))} · ${plural(adv.days, "active day")} of ${adv.span_days} · ${sportIcons(adv.sports)}`
+        : `${typeBadge(adv.type)} No activities yet: use <b>Edit activities</b>.`;
+      if (st.color in METRIC && !hasMetric(st.color)) st.color = "activity";
+      drawTiles(sp);
+      if (st.day && !adv.per_day.some((d) => d.day === st.day)) st.day = 0;
+      $("#adv-days").innerHTML = adv.per_day.length > 1 ? [`<button type="button" class="adv-chip" data-day="0">All days</button>`]
+        .concat(adv.per_day.map((d) => `<button type="button" class="adv-chip" data-day="${d.day}">Day ${d.day}</button>`)).join("") : "";
+      drawTables(sp);
+      drawMap(true);
+      syncState();
+    }
+
+    // ---- summary tiles: a catalogue like the activity page's, chosen per type or per adventure
+    function tileDefs(sp) {
+      const u = U(), byDate = new Map(adv.per_day.map((d) => [d.date, d]));
+      const t = (label, value, unit, dd) => (value == null || value === "–" ? "" : `<div class="tile"${dd ? ` data-day="${dd.day}" role="button" tabindex="0" title="Show day ${dd.day} on the map"` : ""}><div class="label">${esc(label)}</div><div class="value">${value}${unit ? `<span class="unit">${unit}</span>` : ""}</div></div>`);
+      const dayTile = (label, date) => { const d = byDate.get(date); return d ? t(label, esc(sp.f(d.avg_speed_ms)), `${esc(sp.unit)} · day ${d.day}`, d) : ""; };
+      const longest = adv.per_day.length ? adv.per_day.reduce((x, y) => (y.distance_m > x.distance_m ? y : x)) : null;
+      const climb = byDate.get(adv.biggest_climb_day);
+      const n = (v) => (adv.activities ? v : null);
+      const defs = {
+        distance: ["Distance", () => t("Distance", n(esc(sdk.fmt.dist(adv.distance_m, 1))), u.distL)],
+        moving: ["Moving time", () => t("Moving time", n(esc(sdk.fmt.dur(adv.moving_s))))],
+        elapsed: ["Elapsed time", () => t("Elapsed time", n(esc(sdk.fmt.dur(adv.elapsed_s))))],
+        elev_gain: ["Elevation gain", () => t("Elevation gain", n(esc(sdk.fmt.ele(adv.elev_gain_m))), u.eleL)],
+        avg_speed: [sp.label, () => t(sp.label, adv.avg_speed_ms ? esc(sp.f(adv.avg_speed_ms)) : null, esc(sp.unit))],
+        avg_hr: ["Avg heart rate", () => t("Avg heart rate", adv.avg_hr ? String(Math.round(adv.avg_hr)) : null, "bpm")],
+        days: ["Active days", () => t("Days", n(String(adv.days)), `/ ${adv.span_days}`)],
+        span: ["Calendar days", () => t("Calendar days", n(String(adv.span_days)))],
+        activities: ["Activities", () => t("Activities", String(adv.activities))],
+        highest: ["Highest point", () => t("Highest point", adv.highest_point ? esc(sdk.fmt.ele(adv.highest_point.ele_m)) : null, u.eleL)],
+        longest_day: ["Longest day", () => (longest ? t("Longest day", esc(sdk.fmt.dist(longest.distance_m, 1)), `${u.distL} · day ${longest.day}`, longest) : "")],
+        biggest_climb: ["Biggest climb", () => (climb ? t("Biggest climb", esc(sdk.fmt.ele(climb.elev_gain_m)), `${u.eleL} · day ${climb.day}`, climb) : "")],
+        fastest_day: ["Fastest day", () => dayTile("Fastest day", adv.fastest_day)],
+        slowest_day: ["Slowest day", () => dayTile("Slowest day", adv.slowest_day)],
+        avg_day_distance: ["Distance per day", () => t("Distance per day", n(esc(sdk.fmt.dist(adv.avg_per_day.distance_m, 1))), u.distL)],
+        avg_day_moving: ["Moving time per day", () => t("Moving time per day", n(esc(sdk.fmt.dur(adv.avg_per_day.moving_s))))],
+        avg_day_elev: ["Elevation gain per day", () => t("Elevation gain per day", n(esc(sdk.fmt.ele(adv.avg_per_day.elev_gain_m))), u.eleL)],
+        avg_act_distance: ["Distance per activity", () => t("Distance per activity", n(esc(sdk.fmt.dist(adv.avg_per_activity.distance_m, 1))), u.distL)],
+        avg_act_moving: ["Moving time per activity", () => t("Moving time per activity", n(esc(sdk.fmt.dur(adv.avg_per_activity.moving_s))))],
+      };
+      return Object.fromEntries(adv.tile_keys.filter((k) => defs[k]).map((k) => [k, { label: defs[k][0], html: defs[k][1] }]));
+    }
+
+    function drawTiles(sp) {
+      const defs = tileDefs(sp);
+      const own = adv.tiles.source === "adventure";
+      $("#adv-tiles").innerHTML = adv.tiles.keys.map((k) => defs[k]?.html() || "").join("")
+        + `<button type="button" class="tile tile-edit" id="adv-tiles-btn" title="Choose the tiles of this adventure or of every ${esc(TYPES[adv.type][1].toLowerCase())} adventure"><span aria-hidden="true">⚙</span> Customize${own ? ' <span class="adv-small muted">(own)</span>' : ""}</button>`;
+    }
+
+    // Choose and order the tiles, for this adventure or as the default of its type.
+    function editTiles() {
+      const defs = tileDefs(speedFmt(adv.sports)), dlg = $("#adv-tiles-dialog"), list = $("#adv-tile-pick");
+      const chosen = adv.tiles.keys.filter((k) => defs[k]);
+      const order = [...chosen, ...Object.keys(defs).filter((k) => !chosen.includes(k))];
+      const on = new Set(chosen);
+      const typeName = TYPES[adv.type][1];
+      $("#adv-tiles-type").textContent = typeName.toLowerCase();
+      $("#adv-tiles-source").textContent = { adventure: "This adventure has its own tiles.", type: `This adventure uses your ${typeName.toLowerCase()} tiles.`, default: `This adventure uses the standard ${typeName.toLowerCase()} tiles.` }[adv.tiles.source];
+      dlg.querySelector(`[name=scope][value=${adv.tiles.source === "adventure" ? "adventure" : "type"}]`).checked = true;
+      const scope = () => dlg.querySelector("[name=scope]:checked").value;
+      const syncReset = () => { $("#adv-tiles-reset").textContent = scope() === "adventure" ? `Use the ${typeName.toLowerCase()} tiles` : "Reset to standard tiles"; };
+      const drawPick = (focusKey, dir) => {
+        list.innerHTML = order.map((k, i) => `<li data-key="${k}" class="${on.has(k) ? "" : "off"}">
+          <label><input type="checkbox" ${on.has(k) ? "checked" : ""}> ${esc(defs[k].label)}${defs[k].html() ? "" : ' <span class="nodata">(no data here)</span>'}</label>
+          <button type="button" class="btn small ghost" data-move="-1" aria-label="Move ${esc(defs[k].label)} up" ${i ? "" : "disabled"}>↑</button>
+          <button type="button" class="btn small ghost" data-move="1" aria-label="Move ${esc(defs[k].label)} down" ${i < order.length - 1 ? "" : "disabled"}>↓</button></li>`).join("");
+        if (focusKey) list.querySelector(`li[data-key="${focusKey}"] [data-move="${dir}"]:not([disabled])`)?.focus();
+      };
+      list.onchange = (e) => {
+        const li = e.target.closest("li");
+        if (!li) return;
+        if (e.target.checked) on.add(li.dataset.key); else on.delete(li.dataset.key);
+        li.classList.toggle("off", !e.target.checked);
+      };
+      list.onclick = (e) => {
+        const b = e.target.closest("[data-move]");
+        if (!b) return;
+        const key = b.closest("li").dataset.key, i = order.indexOf(key), j = i + Number(b.dataset.move);
+        if (j < 0 || j >= order.length) return;
+        [order[i], order[j]] = [order[j], order[i]];
+        drawPick(key, b.dataset.move);
+      };
+      dlg.onchange = (e) => { if (e.target.name === "scope") syncReset(); };
+      drawPick(); syncReset();
+      dlg.returnValue = "";
+      dlg.addEventListener("close", async () => {
+        if (!["save", "reset"].includes(dlg.returnValue)) return;
+        const keys = dlg.returnValue === "reset" ? null : order.filter((k) => on.has(k));
+        if (keys && !keys.length) { sdk.toast("Choose at least one tile"); return; }
+        try {
+          adv.tiles = await send(`/adventures/${id}/tiles`, "PUT", { keys, scope: scope() });
+          if (ctx.isStale()) return;
+          drawTiles(speedFmt(adv.sports));
+          sdk.toast(scope() === "type" ? `Tiles saved for every ${typeName.toLowerCase()} adventure` : keys ? "Tiles saved for this adventure" : `This adventure uses the ${typeName.toLowerCase()} tiles again`);
+        } catch (e) { sdk.toast(`Could not save: ${e.message}`); }
+      }, { once: true });
+      dlg.showModal();
+    }
+
+    function drawTables(sp) {
+      const { actC, dayC } = colors();
+      const mark = (d) => [d.date === adv.fastest_day && "fastest", d.date === adv.slowest_day && "slowest", d.date === adv.longest_day && "longest", d.date === adv.shortest_day && "shortest"]
+        .filter(Boolean).map((w) => `<span class="badge adv-mark">${w}</span>`).join(" ");
+      $("#adv-perday").innerHTML = adv.per_day.length ? `<table class="adv-table"><thead><tr><th>Day</th><th>Date</th><th class="num">Act.</th><th class="num">Distance (${U().distL})</th><th class="num">Moving</th><th class="num">Elev. (${U().eleL})</th><th class="num">${esc(sp.label.replace("Avg ", ""))} (${esc(sp.unit)})</th><th></th></tr></thead>
+        <tbody>${adv.per_day.map((d) => `<tr data-day="${d.day}" tabindex="0" aria-selected="${d.day === st.day}"><td><span class="adv-sw" style="background:${dayC.get(d.day)}"></span>${d.day}</td><td>${esc(day(d.date))}</td><td class="num">${d.activities}</td>
+          <td class="num">${esc(sdk.fmt.dist(d.distance_m, 1))}</td><td class="num">${esc(sdk.fmt.dur(d.moving_s))}</td><td class="num">${esc(sdk.fmt.ele(d.elev_gain_m))}</td><td class="num">${esc(sp.f(d.avg_speed_ms))}</td><td>${mark(d)}</td></tr>`).join("")}</tbody></table>` : '<p class="muted">–</p>';
+      $("#adv-acts").innerHTML = adv.activity_list.length ? `<table class="adv-table"><thead><tr><th>Day</th><th>Activity</th><th>Sport</th><th class="num">Distance (${U().distL})</th><th class="num">Moving</th><th class="num">Elev. (${U().eleL})</th></tr></thead>
+        <tbody>${adv.activity_list.map((a) => `<tr><td><span class="adv-sw" style="background:${actC.get(a.id)}"></span>${a.day ?? "–"}</td><td><a href="#/activity/${a.id}">${esc(a.name)}</a>${a.track.length ? "" : ' <span class="muted adv-small">(no GPS)</span>'}</td>
+          <td>${esc(sdk.sports.icon(a.sport))} ${esc(sdk.sports.name(a.sport))}</td><td class="num">${esc(sdk.fmt.dist(a.distance_m, 1))}</td><td class="num">${esc(sdk.fmt.dur(a.moving_s))}</td><td class="num">${esc(sdk.fmt.ele(a.elev_gain_m))}</td></tr>`).join("")}</tbody></table>` : '<p class="muted">–</p>';
+    }
+
+    function drawMap(fit) {
+      layer.clearLayers();
+      const { actC, dayC, of } = colors(), casing = sdk.css("--map-casing");
+      const ramp = [1, 2, 3, 4, 5, 6, 7].map((i) => sdk.css(`--ov-${i}`));
+      const shown = adv.activity_list.filter((a) => a.track.length >= 2 && (!st.day || a.day === st.day));
+      const range = st.color in METRIC ? metricRange(st.color, shown) : null;
+      let bounds = null;
+      for (const a of adv.activity_list) {
+        if (a.track.length < 2) continue;
+        const on = !st.day || a.day === st.day;
+        L.polyline(a.track, { color: casing, weight: 5, opacity: on ? 0.6 : 0.15, interactive: false }).addTo(layer);
+        if (range) { // coloured pieces, then an invisible line on top for the tooltip and click
+          const vals = a.values[st.color], step = (v) => (v == null ? -1 : Math.max(0, Math.min(6, Math.floor(((v - range[0]) / (range[1] - range[0] || 1)) * 7))));
+          let from = 0;
+          for (let i = 1; i <= a.track.length; i++) {
+            if (i < a.track.length && step(vals[i]) === step(vals[from])) continue;
+            const b = step(vals[from]);
+            L.polyline(a.track.slice(from, Math.min(i + 1, a.track.length)), { color: b < 0 ? sdk.css("--text-muted") : ramp[b], weight: 3, opacity: on ? 0.95 : 0.2, interactive: false }).addTo(layer);
+            from = i;
+          }
+        }
+        const line = L.polyline(a.track, { color: of(a), weight: range ? 8 : 3, opacity: range ? 0 : on ? 0.95 : 0.2 })
+          .bindTooltip(`Day ${a.day ?? "–"} · ${esc(sdk.sports.icon(a.sport))} ${esc(a.name)}<br><span class="muted">${esc(sdk.fmt.dist(a.distance_m, 1))} ${U().distL} · ${esc(sdk.fmt.dur(a.moving_s))}</span>`, { sticky: true })
+          .on("click", () => sdk.navigate(`#/activity/${a.id}`)).addTo(layer);
+        if (on) bounds = bounds ? bounds.extend(line.getBounds()) : line.getBounds();
+      }
+      if (fit && bounds) map.fitBounds(bounds, { padding: [24, 24], animate: false });
+      if (fit && !bounds) map.setView([20, 0], 2, { animate: false });
+      const row = (c, label) => `<div class="adv-lg-row"><span class="adv-sw" style="background:${c}"></span>${label}</div>`;
+      const lg = legend.getContainer();
+      const tracks = adv.activity_list.filter((a) => a.track.length >= 2);
+      if (!tracks.length) { lg.innerHTML = '<span class="muted">No GPS tracks</span>'; return; }
+      if (range) {
+        lg.innerHTML = `<div class="lg-title">${esc(st.color === "speed" ? $("#adv-speed-btn").textContent : METRIC[st.color].label)}</div><div class="lg-ramp">${ramp.map((c) => `<span style="background:${c}"></span>`).join("")}</div>
+          <div class="lg-labels"><span>${METRIC[st.color].f(range[0])}</span><span>${METRIC[st.color].f(range[1])}</span></div>`;
+      } else if (st.color === "total") lg.innerHTML = `<div class="lg-title">Total</div>${row(sdk.css("--accent"), `${esc(sdk.fmt.dist(adv.distance_m, 1))} ${U().distL}`)}`;
+      else if (st.color === "day") lg.innerHTML = `<div class="lg-title">Day</div>${adv.per_day.map((d) => row(dayC.get(d.day), `Day ${d.day} · ${esc(day(d.date))}`)).join("")}`;
+      else lg.innerHTML = `<div class="lg-title">Activity</div>${tracks.slice(0, 12).map((a) => row(actC.get(a.id), `${a.day ?? "–"} · ${esc(a.name)}`)).join("")}${tracks.length > 12 ? `<div class="muted">+${tracks.length - 12} more</div>` : ""}`;
+    }
+
+    // -- the activity picker (edit members)
+    async function drawPicker() {
+      const box = $("#adv-picker");
+      $("#adv-edit").setAttribute("aria-expanded", String(st.editing));
+      if (!st.editing) { box.innerHTML = ""; return; }
+      const iso = (d) => d.toISOString().slice(0, 10), shift = (s, n) => iso(new Date(Date.parse(`${s}T12:00:00Z`) + n * 864e5));
+      const from = box.dataset.from || (adv.first_day ? shift(adv.first_day, -3) : iso(new Date(Date.now() - 30 * 864e5)));
+      const to = box.dataset.to || (adv.last_day ? shift(adv.last_day, 3) : iso(new Date()));
+      Object.assign(box.dataset, { from, to });
+      const list = await send(`/activities?from=${from}&to=${to}`);
+      if (ctx.isStale()) return;
+      const mine = new Set(box.dataset.picked ? box.dataset.picked.split(",").filter(Boolean).map(Number) : adv.activity_list.map((a) => a.id));
+      box.dataset.picked = [...mine].join(",");
+      box.innerHTML = `<form class="card adv-picker" id="adv-pick-form"><h2><span>Activities in this adventure</span><span class="muted adv-small" id="adv-pick-n"></span></h2>
+        <div class="adv-actions"><label class="adv-small">from <input type="date" id="adv-from" value="${esc(from)}"></label><label class="adv-small">to <input type="date" id="adv-to" value="${esc(to)}"></label></div>
+        <div class="table-scroll adv-pick-scroll"><table class="adv-table"><tbody>${list.map((a) => `<tr><td><input type="checkbox" name="pick" value="${a.id}" aria-label="Include ${esc(a.name)}"${mine.has(a.id) ? " checked" : ""}></td>
+          <td>${esc(day(a.start_time))}</td><td>${esc(sdk.sports.icon(a.sport))} ${esc(a.name)}${a.has_gps ? "" : ' <span class="muted adv-small">(no GPS)</span>'}</td><td class="num">${dist(a.distance_m)}</td>
+          <td class="muted adv-small">${a.adventures.filter((x) => x !== id).length ? "in another adventure" : ""}</td></tr>`).join("") || '<tr><td class="muted">No activities in these dates.</td></tr>'}</tbody></table></div>
+        <div class="adv-actions"><button type="submit" class="btn primary small">Save</button><button type="button" class="btn small" id="adv-pick-cancel">Cancel</button></div></form>`;
+      $("#adv-pick-n").textContent = `${mine.size} selected`;
+    }
+
+    el.addEventListener("change", (ev) => {
+      const box = $("#adv-picker");
+      if (ev.target.name === "pick") {
+        const mine = new Set(box.dataset.picked.split(",").filter(Boolean).map(Number));
+        ev.target.checked ? mine.add(+ev.target.value) : mine.delete(+ev.target.value);
+        box.dataset.picked = [...mine].join(",");
+        $("#adv-pick-n").textContent = `${mine.size} selected`;
+      } else if (ev.target.id === "adv-from" || ev.target.id === "adv-to") {
+        box.dataset.from = $("#adv-from").value; box.dataset.to = $("#adv-to").value;
+        drawPicker().catch((e) => sdk.toast(e.message));
+      }
+    });
+    el.addEventListener("submit", async (ev) => {
+      if (ev.target.id !== "adv-pick-form") return; // the tiles dialog closes itself (method="dialog")
+      ev.preventDefault();
+      const box = $("#adv-picker"), ids = box.dataset.picked.split(",").filter(Boolean).map(Number);
+      try {
+        adv = await send(`/adventures/${id}/activities`, "PUT", { activity_ids: ids });
+        st.editing = false; box.dataset.picked = box.dataset.from = box.dataset.to = "";
+        drawPicker(); draw(); sdk.toast("Activities saved");
+      } catch (e) { sdk.toast(e.message); }
+    });
+    el.addEventListener("keydown", (ev) => {
+      const tr = ev.target.closest("[data-day][tabindex]");
+      if (tr && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); tr.click(); }
+    });
+    el.addEventListener("click", async (ev) => {
+      const t = ev.target;
+      try {
+        if (t.closest("#adv-tiles-btn")) { editTiles(); return; }
+        const c = t.closest("[data-color]"), d = t.closest("[data-day]"), ty = t.closest("[data-type]");
+        if (c) { st.color = c.dataset.color; drawTables(speedFmt(adv.sports)); drawMap(false); syncState(); }
+        else if (d && !t.closest("a")) {
+          st.day = +d.dataset.day === st.day && d.tagName !== "BUTTON" ? 0 : +d.dataset.day;
+          el.querySelectorAll("tr[data-day]").forEach((r) => r.setAttribute("aria-selected", String(+r.dataset.day === st.day)));
+          drawMap(true); syncState();
+        } else if (ty && ty.dataset.type !== adv.type) { adv = await send(`/adventures/${id}`, "PATCH", { type: ty.dataset.type }); draw(); }
+        else if (t.closest("#adv-rename")) {
+          const name = await sdk.askName("Rename adventure", "", adv.name, "Rename");
+          if (name && name !== adv.name) { adv = await send(`/adventures/${id}`, "PATCH", { name }); draw(); }
+        } else if (t.closest("#adv-edit") || t.closest("#adv-pick-cancel")) {
+          st.editing = t.closest("#adv-edit") ? !st.editing : false;
+          Object.assign($("#adv-picker").dataset, { picked: "", from: "", to: "" });
+          syncState(); await drawPicker();
+        } else if (t.closest("#adv-delete")) {
+          const b = t.closest("button");
+          if (!pendingDelete) { // two-step: the first click asks, the second deletes
+            pendingDelete = true; b.textContent = "Confirm delete";
+            deleteTimer = setTimeout(() => { pendingDelete = false; if (b.isConnected) b.textContent = "Delete"; }, 4000);
+            return;
+          }
+          await send(`/adventures/${id}`, "DELETE");
+          sdk.toast(`Deleted ${adv.name} (its activities are kept)`);
+          sdk.navigate("#/m/adventures");
+        }
+      } catch (e) { sdk.toast(e.message); }
+    });
+    draw();
+    await drawPicker();
+  }
+
+  // ---- activity page: the adventures this activity belongs to -------------------------------
+  sdk.registerActivityCard({
+    module: "adventures",
+    title: "Adventure",
+    order: 70,
+    placement: "header",
+    async render(el, ctx) {
+      const list = await send(`/activity/${ctx.activity.id}`);
+      if (!list.length) return false;
+      el.innerHTML = `<div class="adv-line">${list.map((a) => `<a class="adv-chip" href="#/m/adventures?id=${a.id}">${(TYPES[a.type] || TYPES.traverse)[0]} ${esc(a.name)}${a.day ? ` <span class="muted">· day ${a.day} of ${a.span_days}</span>` : ""}</a>`).join("")}</div>`;
+    },
+  });
+})();
