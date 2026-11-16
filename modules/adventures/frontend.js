@@ -152,8 +152,8 @@
       $("#adv-settings").innerHTML = `<form class="card adv-form" id="adv-cfg"><h2><span>Detection settings</span></h2>
         <div class="adv-fields">
           <label>Max days without activity between days <input name="max_gap_days" type="number" min="0" max="30" step="1" value="${cfg.max_gap_days}"></label>
-          <label>Traverse: next start within (${u}) of an end <input name="traverse_max_m" type="number" min="0.1" step="0.1" value="${+(cfg.traverse_max_m / m).toFixed(2)}"></label>
-          <label>Multi-day: starts within (${u}) of the base <input name="base_radius_m" type="number" min="0.1" step="0.1" value="${+(cfg.base_radius_m / m).toFixed(2)}"></label>
+          <label>Traverse: each start within (${u}) of the previous end <input name="traverse_link_m" type="number" min="0.05" step="0.05" value="${+(cfg.traverse_link_m / m).toFixed(2)}"></label>
+          <label>Same place: a start within (${u}) of an earlier start or end <input name="base_radius_m" type="number" min="0.1" step="0.1" value="${+(cfg.base_radius_m / m).toFixed(2)}"></label>
           <label>Minimum days <input name="min_days" type="number" min="1" max="60" step="1" value="${cfg.min_days}"></label>
           <label>Ignore home (a place used in this many weeks; 0 = off) <input name="home_weeks" type="number" min="0" step="1" value="${cfg.home_weeks}"></label>
           <label>Excluded tags (comma-separated) <input name="exclude_tags" value="${esc(cfg.exclude_tags.join(", "))}" placeholder="commute"></label>
@@ -170,7 +170,7 @@
       const m = unitM(), v = (n) => f.elements[n].value;
       const body = {
         max_gap_days: +v("max_gap_days"), min_days: +v("min_days"), home_weeks: +v("home_weeks"),
-        traverse_max_m: +v("traverse_max_m") * m, base_radius_m: +v("base_radius_m") * m,
+        traverse_link_m: +v("traverse_link_m") * m, base_radius_m: +v("base_radius_m") * m,
         exclude_tags: v("exclude_tags").split(",").map((t) => t.trim()).filter(Boolean),
         sports: [...f.querySelectorAll("[name=sport]:checked")].map((c) => c.value),
         osm_names: f.elements.osm_names.checked,
@@ -233,7 +233,7 @@
     }
     if (ctx.isStale()) return;
     const st = {
-      color: ["day", "total"].includes(ctx.params.get("color")) ? ctx.params.get("color") : "activity",
+      color: ["day", "total", "ele", "speed", "hr"].includes(ctx.params.get("color")) ? ctx.params.get("color") : "activity",
       day: +ctx.params.get("day") || 0, editing: ctx.params.get("edit") === "1",
     };
     el.innerHTML = `
@@ -249,6 +249,7 @@
       <div class="card adv-map-card">
         <div class="adv-map-bar"><span class="adv-small muted">Colour by</span>
           <span class="seg" role="group" aria-label="Colour by"><button type="button" data-color="activity">Activity</button><button type="button" data-color="day">Day</button><button type="button" data-color="total">Total</button></span>
+          <span class="seg" role="group" aria-label="Colour by a measure"><button type="button" data-color="ele">Elevation</button><button type="button" data-color="speed" id="adv-speed-btn">Speed</button><button type="button" data-color="hr">Heart rate</button></span>
           <span class="adv-days" id="adv-days" role="group" aria-label="Show day"></span></div>
         <div id="adv-map" class="adv-map"></div></div>
       <div class="adv-hl" id="adv-hl"></div>
@@ -270,10 +271,26 @@
       return { actC, dayC, of: (a) => (st.color === "total" ? sdk.css("--accent") : st.color === "day" ? dayC.get(a.day) : actC.get(a.id)) };
     };
 
+    // colouring along the route by a measure, like the activity map: one-hue sequential ramp
+    const METRIC = {
+      ele: { label: "Elevation", f: (v) => `${esc(sdk.fmt.ele(v))} ${U().eleL}` },
+      speed: { label: "Speed", f: (v) => { const sp = speedFmt(adv.sports); return `${esc(sp.f(v))} ${esc(sp.unit)}`; } },
+      hr: { label: "Heart rate", f: (v) => `${Math.round(v)} bpm` },
+    };
+    const hasMetric = (k) => adv.activity_list.some((a) => a.values?.[k]?.some((v) => v != null));
+    function metricRange(k, acts) {
+      const vals = acts.flatMap((a) => a.values[k].filter((v) => v != null)).sort((x, y) => x - y);
+      if (!vals.length) return null;
+      const q = (p) => vals[Math.min(vals.length - 1, Math.floor(p * vals.length))];
+      return [q(0.02), q(0.98)]; // ignore the odd GPS / sensor spike at either end
+    }
+
     function syncState() {
       ctx.setParams({ id, color: st.color === "activity" ? "" : st.color, day: st.day || "", edit: st.editing ? "1" : "" });
       el.querySelectorAll("[data-color]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.color === st.color)));
       el.querySelectorAll("[data-color]").forEach((b) => b.classList.toggle("active", b.dataset.color === st.color));
+      for (const k of Object.keys(METRIC)) { const b = el.querySelector(`[data-color=${k}]`); b.disabled = !hasMetric(k); b.title = b.disabled ? "No data for this measure" : ""; }
+      $("#adv-speed-btn").textContent = speedFmt(adv.sports).label === "Avg pace" ? "Pace" : "Speed";
       el.querySelectorAll("[data-type]").forEach((b) => { b.classList.toggle("active", b.dataset.type === adv.type); b.setAttribute("aria-pressed", String(b.dataset.type === adv.type)); });
       el.querySelectorAll("[data-day]").forEach((b) => b.setAttribute("aria-pressed", String(+b.dataset.day === st.day)));
     }
@@ -284,9 +301,15 @@
       $("#adv-sub").innerHTML = adv.first_day
         ? `${typeBadge(adv.type)} ${esc(span(adv.first_day, adv.last_day))} · ${plural(adv.days, "active day")} of ${adv.span_days} · ${sportIcons(adv.sports)}${adv.place?.name ? ` · 📍 ${esc(placeText(adv.place))}` : ""}`
         : `${typeBadge(adv.type)} No activities yet: use <b>Edit activities</b>.`;
+      if (st.color in METRIC && !hasMetric(st.color)) st.color = "activity";
+      const longest = adv.per_day.length ? adv.per_day.reduce((x, y) => (y.distance_m > x.distance_m ? y : x)) : null;
+      const climb = adv.per_day.find((d) => d.date === adv.biggest_climb_day);
       $("#adv-tiles").innerHTML = tile("Distance", esc(sdk.fmt.dist(adv.distance_m, 1)), U().distL) + tile("Moving time", esc(sdk.fmt.dur(adv.moving_s)))
         + tile("Elevation gain", esc(sdk.fmt.ele(adv.elev_gain_m)), U().eleL) + tile(sp.label, esc(sp.f(adv.avg_speed_ms)), sp.unit)
-        + tile("Days", `${adv.days}<span class="unit">/ ${adv.span_days}</span>`) + tile("Activities", String(adv.activities));
+        + tile("Days", `${adv.days}<span class="unit">/ ${adv.span_days}</span>`) + tile("Activities", String(adv.activities))
+        + (adv.highest_point ? tile("Highest point", esc(sdk.fmt.ele(adv.highest_point.ele_m)), U().eleL) : "")
+        + (longest ? tile("Longest day", esc(sdk.fmt.dist(longest.distance_m, 1)), U().distL) : "")
+        + (climb ? tile("Biggest climb", esc(sdk.fmt.ele(climb.elev_gain_m)), U().eleL) : "");
       if (st.day && !adv.per_day.some((d) => d.day === st.day)) st.day = 0;
       $("#adv-days").innerHTML = adv.per_day.length > 1 ? [`<button type="button" class="adv-chip" data-day="0">All days</button>`]
         .concat(adv.per_day.map((d) => `<button type="button" class="adv-chip" data-day="${d.day}">Day ${d.day}</button>`)).join("") : "";
@@ -306,7 +329,7 @@
       const avgHl = (label, o) => hl(label, dist(o.distance_m), `${esc(sdk.fmt.dur(o.moving_s))} · ${esc(sdk.fmt.ele(o.elev_gain_m))} ${U().eleL}`);
       const pace = (d) => `${esc(sp.f(d.avg_speed_ms))} ${esc(sp.unit)}`;
       $("#adv-hl").innerHTML = adv.activities ? dayHl("Fastest day", adv.fastest_day, pace) + dayHl("Slowest day", adv.slowest_day, pace)
-        + dayHl("Longest day", adv.longest_day, (d) => dist(d.distance_m)) + avgHl("Average per day", adv.avg_per_day)
+        + avgHl("Average per day", adv.avg_per_day)
         + avgHl("Average per activity", adv.avg_per_activity) : "";
       $("#adv-perday").innerHTML = adv.per_day.length ? `<table class="adv-table"><thead><tr><th>Day</th><th>Date</th><th class="num">Act.</th><th class="num">Distance (${U().distL})</th><th class="num">Moving</th><th class="num">Elev. (${U().eleL})</th><th class="num">${esc(sp.label.replace("Avg ", ""))} (${esc(sp.unit)})</th><th></th></tr></thead>
         <tbody>${adv.per_day.map((d) => `<tr data-day="${d.day}" tabindex="0" aria-selected="${d.day === st.day}"><td><span class="adv-sw" style="background:${dayC.get(d.day)}"></span>${d.day}</td><td>${esc(day(d.date))}</td><td class="num">${d.activities}</td>
@@ -319,12 +342,25 @@
     function drawMap(fit) {
       layer.clearLayers();
       const { actC, dayC, of } = colors(), casing = sdk.css("--map-casing");
+      const ramp = [1, 2, 3, 4, 5, 6, 7].map((i) => sdk.css(`--ov-${i}`));
+      const shown = adv.activity_list.filter((a) => a.track.length >= 2 && (!st.day || a.day === st.day));
+      const range = st.color in METRIC ? metricRange(st.color, shown) : null;
       let bounds = null;
       for (const a of adv.activity_list) {
         if (a.track.length < 2) continue;
         const on = !st.day || a.day === st.day;
         L.polyline(a.track, { color: casing, weight: 5, opacity: on ? 0.6 : 0.15, interactive: false }).addTo(layer);
-        const line = L.polyline(a.track, { color: of(a), weight: 3, opacity: on ? 0.95 : 0.2 })
+        if (range) { // coloured pieces, then an invisible line on top for the tooltip and click
+          const vals = a.values[st.color], step = (v) => (v == null ? -1 : Math.max(0, Math.min(6, Math.floor(((v - range[0]) / (range[1] - range[0] || 1)) * 7))));
+          let from = 0;
+          for (let i = 1; i <= a.track.length; i++) {
+            if (i < a.track.length && step(vals[i]) === step(vals[from])) continue;
+            const b = step(vals[from]);
+            L.polyline(a.track.slice(from, Math.min(i + 1, a.track.length)), { color: b < 0 ? sdk.css("--text-muted") : ramp[b], weight: 3, opacity: on ? 0.95 : 0.2, interactive: false }).addTo(layer);
+            from = i;
+          }
+        }
+        const line = L.polyline(a.track, { color: of(a), weight: range ? 8 : 3, opacity: range ? 0 : on ? 0.95 : 0.2 })
           .bindTooltip(`Day ${a.day ?? "–"} · ${esc(sdk.sports.icon(a.sport))} ${esc(a.name)}<br><span class="muted">${esc(sdk.fmt.dist(a.distance_m, 1))} ${U().distL} · ${esc(sdk.fmt.dur(a.moving_s))}</span>`, { sticky: true })
           .on("click", () => sdk.navigate(`#/activity/${a.id}`)).addTo(layer);
         if (on) bounds = bounds ? bounds.extend(line.getBounds()) : line.getBounds();
@@ -335,7 +371,10 @@
       const lg = legend.getContainer();
       const tracks = adv.activity_list.filter((a) => a.track.length >= 2);
       if (!tracks.length) { lg.innerHTML = '<span class="muted">No GPS tracks</span>'; return; }
-      if (st.color === "total") lg.innerHTML = `<div class="lg-title">Total</div>${row(sdk.css("--accent"), `${esc(sdk.fmt.dist(adv.distance_m, 1))} ${U().distL}`)}`;
+      if (range) {
+        lg.innerHTML = `<div class="lg-title">${esc(st.color === "speed" ? $("#adv-speed-btn").textContent : METRIC[st.color].label)}</div><div class="lg-ramp">${ramp.map((c) => `<span style="background:${c}"></span>`).join("")}</div>
+          <div class="lg-labels"><span>${METRIC[st.color].f(range[0])}</span><span>${METRIC[st.color].f(range[1])}</span></div>`;
+      } else if (st.color === "total") lg.innerHTML = `<div class="lg-title">Total</div>${row(sdk.css("--accent"), `${esc(sdk.fmt.dist(adv.distance_m, 1))} ${U().distL}`)}`;
       else if (st.color === "day") lg.innerHTML = `<div class="lg-title">Day</div>${adv.per_day.map((d) => row(dayC.get(d.day), `Day ${d.day} · ${esc(day(d.date))}`)).join("")}`;
       else lg.innerHTML = `<div class="lg-title">Activity</div>${tracks.slice(0, 12).map((a) => row(actC.get(a.id), `${a.day ?? "–"} · ${esc(a.name)}`)).join("")}${tracks.length > 12 ? `<div class="muted">+${tracks.length - 12} more</div>` : ""}`;
     }

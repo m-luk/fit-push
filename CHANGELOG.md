@@ -15,11 +15,14 @@ How to update it: see "Changelog" in `AGENTS.md`.
   fastest and slowest day, averages per day and per activity, and one map coloured by
   activity, by day or as a single total line. It proposes adventures automatically;
   sports, excluded tags (default `commute`), the allowed gap between days (default 1
-  day) and the traverse distance (default 10 km) can be changed. Proposals unfold to show
+  day) and the traverse distance (default 1 km) can be changed. Proposals unfold to show
   their activities on a small map. Adventures are named after the national park (or mountain
   range) and nearest city found on OpenStreetMap (`YYYY-MM Park, City`); this sends one rounded point of the
   route per proposal (looked up once, in the background) and can be switched off. Saved
-  adventures show at once while detection runs in the background.
+  adventures show at once while detection runs in the background. A traverse must be one
+  continuous line (each start within 1 km of the previous end, mostly point-to-point);
+  other trips are multi-day. Tiles show the highest point, the longest day and the
+  biggest climb, and the map can also be coloured by elevation, speed or heart rate.
 
 ## [0.4.0] - 2026-11-16
 

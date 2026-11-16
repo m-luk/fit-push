@@ -14,28 +14,36 @@ model stays untouched (an adventure only references activity ids).
 
 Two adventure types:
 
-- **Traverse**: a chain of tracks where each activity starts near where an earlier one
-  ended (default: within 10 km).
-- **Multi-day**: activities that start from the same base (default: within 2 km of the
-  first start) on consecutive days.
+- **Traverse**: one continuous line that goes somewhere. In time order, every activity
+  starts within `traverse_link_m` (default 1 km) of where the previous one ended, and at
+  least half of the activities are point-to-point (they end more than `base_radius_m`
+  from their start). A loop from camp in between is fine; a bus ride is not.
+- **Multi-day**: every other group: outings from one base, hut to hut with gaps, a trip
+  with loops from a few places.
 
 **Autodetect** walks the candidate activities in time order (GPS and a start time, the
 allowed sports, none of the excluded tags, not yet in an adventure). An activity joins
 the current group when at most `max_gap_days` calendar days without activity lie between
-it and the group's last day, and it starts within `traverse_max_m` of an end point of
-the group or within `base_radius_m` of the group's base. Starts at a **home** location
-(a place with starts in at least `home_weeks` different weeks) never link, so everyday
-training from home is not proposed. A group with at least `min_days` days becomes a
-proposal: multi-day when every start is near the base, otherwise traverse. Dismissed
-proposals are remembered and not shown again.
+it and the group's last day, and it starts within `traverse_link_m` of the previous end
+or within `base_radius_m` (default 2 km) of any start or end of the group. Starts at a
+**home** location (a place with starts in at least `home_weeks` different weeks) never
+link, so everyday training from home is not proposed. A group with at least `min_days`
+days becomes a proposal, typed by the rule above (`max_gap_m` is its largest gap between
+the end of one track and the start of the next). Dismissed proposals are remembered and
+not shown again.
+
+The adventure view also gives the highest point (`ele_max_m` of the activity summaries),
+the longest day and the day with the biggest climb, and per activity a thinned line
+(~25 m) with elevation, speed and heart rate per point, so the map can be coloured by a
+measure like the activity map.
 
 Endpoints (under `/api/m/adventures`):
 
 - `GET /settings`, `PUT /settings`: detection settings `{sports, exclude_tags,
-  max_gap_days, traverse_max_m, base_radius_m, min_days, home_weeks, osm_names}`; `sports` empty =
+  max_gap_days, traverse_link_m, base_radius_m, min_days, home_weeks, osm_names}`; `sports` empty =
   any sport (mixed adventures allowed); `exclude_tags` defaults to `["commute"]`.
 - `GET /suggestions`: proposals `{key, type, name, activity_ids, first_day, last_day,
-  days, distance_m}`; `POST /suggestions/dismiss` `{key}`; `POST /suggestions/reset`
+  days, max_gap_m, distance_m, activities}`; `POST /suggestions/dismiss` `{key}`; `POST /suggestions/reset`
   forgets dismissed proposals.
 - `GET /adventures`: all adventures with totals; `POST /adventures` `{name, type,
   activity_ids}`.

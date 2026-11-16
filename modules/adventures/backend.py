@@ -21,12 +21,27 @@ from app.sdk import Invalid, ModuleContext, NotFound
 
 TYPES = ("traverse", "multiday")
 TYPE_LABEL = {"traverse": "Traverse", "multiday": "Multi-day"}
+P2P_SHARE = 0.5  # traverse: at least this share of activities must end away from where they started
+
+
+def classify(starts: list, ends: list, link_m: float, radius_m: float) -> tuple[str, float]:
+    """Traverse when the activities (in time order) form one continuous line that goes
+    somewhere: every start lies within ``link_m`` of the previous end, and at least half of
+    the activities are point-to-point (end more than ``radius_m`` from their start).
+    Anything else is multi-day. Returns the type and the largest gap between tracks."""
+    gaps = [haversine(e, s) for e, s in zip(ends, starts[1:], strict=False)]
+    p2p = sum(haversine(s, e) > radius_m for s, e in zip(starts, ends, strict=True))
+    biggest = max(gaps, default=0.0)
+    traverse = len(starts) >= 2 and biggest <= link_m and p2p >= P2P_SHARE * len(starts)
+    return ("traverse" if traverse else "multiday"), biggest
+
+
 DEFAULTS: dict = {
     "sports": [],  # empty: any sport, mixed adventures allowed
     "exclude_tags": ["commute"],
     "max_gap_days": 1,  # calendar days without activity allowed between two days of one adventure
-    "traverse_max_m": 10_000.0,  # next start within this distance of an earlier end
-    "base_radius_m": 2_000.0,  # multi-day: starts within this distance of the base
+    "traverse_link_m": 1_000.0,  # traverse: each start within this distance of the previous end
+    "base_radius_m": 2_000.0,  # grouping: a start within this distance of a start or end of the group
     "min_days": 2,
     "home_weeks": 8,  # a place with starts in this many different weeks is "home"; 0 = off
     "osm_names": True,  # look up park / city names on OpenStreetMap (one rounded point per lookup)
@@ -37,7 +52,7 @@ class SettingsIn(BaseModel):
     sports: list[str] = Field(default_factory=list, max_length=100)
     exclude_tags: list[str] = Field(default_factory=list, max_length=100)
     max_gap_days: int = Field(default=1, ge=0, le=30)
-    traverse_max_m: float = Field(default=10_000.0, gt=0, le=500_000)
+    traverse_link_m: float = Field(default=1_000.0, ge=50, le=50_000)
     base_radius_m: float = Field(default=2_000.0, gt=0, le=100_000)
     min_days: int = Field(default=2, ge=1, le=60)
     home_weeks: int = Field(default=8, ge=0, le=1000)
@@ -191,10 +206,12 @@ def register(ctx: ModuleContext) -> None:
 
     ends_cache: dict[int, tuple[list[float], list[float]] | None] = {}  # id -> (start, end); points never change
     tracks: dict[int, list] = {}
+    profiles: dict[int, dict] = {}  # id -> thinned line with values for colouring the map
 
     def on_deleted(activity_id: int) -> None:
         ends_cache.pop(activity_id, None)
         tracks.pop(activity_id, None)
+        profiles.pop(activity_id, None)
         ctx.db.execute(f"DELETE FROM {mem_t} WHERE activity_id = ?", (activity_id,))
         ctx.db.execute(f"DELETE FROM {adv_t} WHERE id NOT IN (SELECT DISTINCT adventure_id FROM {mem_t})")
         ctx.db.execute(f"DELETE FROM {pl_t} WHERE adventure_id NOT IN (SELECT id FROM {adv_t})")
@@ -206,6 +223,40 @@ def register(ctx: ModuleContext) -> None:
         if aid not in tracks:
             tracks[aid] = ctx.core.track(aid, step_m=25, max_points=500)
         return tracks[aid]
+
+    def profile(aid: int, step_m: float = 25.0, max_points: int = 800) -> dict:
+        """The GPS line thinned to ~``step_m`` with elevation, speed and heart rate per point
+        (speed from the distance and time between kept points; None across pauses)."""
+        if aid in profiles:
+            return profiles[aid]
+        c = ctx.core.points(aid)
+        idx = [
+            i for i, (la, lo) in enumerate(zip(c["lat"], c["lon"], strict=True)) if la is not None and lo is not None
+        ]
+        pts = [[c["lat"][i], c["lon"][i]] for i in idx]
+        total = sum(haversine(a, b) for a, b in itertools.pairwise(pts))
+        step = max(step_m, total / max_points)
+        keep, run = [0] if idx else [], 0.0
+        for k in range(1, len(idx)):
+            run += haversine(pts[k - 1], pts[k])
+            if run >= step or k == len(idx) - 1:
+                keep.append(k)
+                run = 0.0
+        out: dict = {"track": [pts[k] for k in keep], "ele": [], "speed": [], "hr": []}
+        for j, k in enumerate(keep):
+            i = idx[k]
+            out["ele"].append(c["ele"][i])
+            out["hr"].append(c["hr"][i])
+            speed = None
+            if j and c["t"][i] is not None and c["t"][idx[keep[j - 1]]] is not None:
+                dt = c["t"][i] - c["t"][idx[keep[j - 1]]]
+                if 0 < dt <= 120:
+                    speed = haversine(pts[keep[j - 1]], pts[k]) / dt
+            out["speed"].append(speed)
+        if len(out["speed"]) > 1:
+            out["speed"][0] = out["speed"][1]
+        profiles[aid] = out
+        return out
 
     def ends(aid: int) -> tuple[list[float], list[float]] | None:
         if aid not in ends_cache:
@@ -252,6 +303,7 @@ def register(ctx: ModuleContext) -> None:
             "moving_s": float(s.get("moving_s") or 0),
             "elapsed_s": float(s.get("elapsed_s") or 0),
             "elev_gain_m": float(s.get("elev_gain_m") or 0),
+            "ele_max_m": s.get("ele_max_m"),
             "avg_hr": s.get("avg_hr"),
             "has_gps": bool(s.get("has_gps")),
         }
@@ -302,13 +354,15 @@ def register(ctx: ModuleContext) -> None:
                 continue
             if skip_tags & {t.lower() for t in a["tags"]}:
                 continue
+            # joins: close in time, not at home, and starting at the previous end or near any
+            # start / end of the group (a base, a hut, the last camp)
             joins = (
                 cur is not None
                 and (day - cur["last"]).days - 1 <= cfg["max_gap_days"]
                 and not at_home(start)
                 and (
-                    any(haversine(e, start) <= cfg["traverse_max_m"] for e in cur["ends"])
-                    or haversine(cur["base"], start) <= radius
+                    haversine(cur["ends"][-1], start) <= cfg["traverse_link_m"]
+                    or any(haversine(p, start) <= radius for p in cur["starts"] + cur["ends"])
                 )
             )
             if not joins:
@@ -327,7 +381,7 @@ def register(ctx: ModuleContext) -> None:
             key = ",".join(map(str, ids))
             if len(ids) < 2 or len(g["days"]) < cfg["min_days"] or key in dismissed:
                 continue
-            kind = "multiday" if all(haversine(g["base"], s) <= radius for s in g["starts"]) else "traverse"
+            kind, biggest_gap = classify(g["starts"], g["ends"], cfg["traverse_link_m"], radius)
             first, last = min(g["days"]).isoformat(), max(g["days"]).isoformat()
             rows = [row(a) for a in g["acts"]]
             out.append(
@@ -339,6 +393,7 @@ def register(ctx: ModuleContext) -> None:
                     "first_day": first,
                     "last_day": last,
                     "days": len(g["days"]),
+                    "max_gap_m": biggest_gap,
                     "sports": sorted({r["sport"] for r in rows}),
                     "distance_m": sum(r["distance_m"] for r in rows),
                     "moving_s": sum(r["moving_s"] for r in rows),
@@ -414,13 +469,22 @@ def register(ctx: ModuleContext) -> None:
             d = day_of(r["start_time"])
             r["day"] = (d - first).days + 1 if d and first else None
             r["avg_speed_ms"] = r["distance_m"] / r["moving_s"] if r["moving_s"] > 0 else None
-            r["track"] = track(r["id"]) if r["has_gps"] else []
+            line = profile(r["id"]) if r["has_gps"] else {"track": [], "ele": [], "speed": [], "hr": []}
+            r["track"], r["values"] = line["track"], {k: line[k] for k in ("ele", "speed", "hr")}
             if d:
                 by_day.setdefault(d.isoformat(), []).append(r)
         days = [
-            {"date": d, "day": rs[0]["day"], "activities": len(rs), "activity_ids": [r["id"] for r in rs], **stats(rs)}
+            {
+                "date": d,
+                "day": rs[0]["day"],
+                "activities": len(rs),
+                "activity_ids": [r["id"] for r in rs],
+                "ele_max_m": max((r["ele_max_m"] for r in rs if r["ele_max_m"] is not None), default=None),
+                **stats(rs),
+            }
             for d, rs in sorted(by_day.items())
         ]
+        top = max((r for r in rows if r["ele_max_m"] is not None), key=lambda r: r["ele_max_m"], default=None)
         timed = [d for d in days if d["avg_speed_ms"]]
         n_days, n_acts = len(days) or 1, len(rows) or 1
         keys = ("distance_m", "moving_s", "elev_gain_m")
@@ -432,6 +496,15 @@ def register(ctx: ModuleContext) -> None:
                 "slowest_day": min(timed, key=lambda d: d["avg_speed_ms"])["date"] if len(timed) > 1 else None,
                 "longest_day": max(days, key=lambda d: d["distance_m"])["date"] if len(days) > 1 else None,
                 "shortest_day": min(days, key=lambda d: d["distance_m"])["date"] if len(days) > 1 else None,
+                "biggest_climb_day": max(days, key=lambda d: d["elev_gain_m"])["date"] if days else None,
+                "highest_point": {
+                    "ele_m": top["ele_max_m"],
+                    "activity_id": top["id"],
+                    "name": top["name"],
+                    "day": top["day"],
+                }
+                if top
+                else None,
                 "avg_per_day": {k: out[k] / n_days for k in keys},
                 "avg_per_activity": {k: out[k] / n_acts for k in keys},
                 "place": stored_place(adv_id),

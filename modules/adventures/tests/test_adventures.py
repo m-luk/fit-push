@@ -47,7 +47,7 @@ def test_gap_and_distance_limits(make_client):
     assert [s["activity_ids"] for s in sugg] == [[a, b]]
     assert far not in sugg[0]["activity_ids"]
     # raise the limits: everything chains
-    r = client.put(f"{API}/settings", json={"max_gap_days": 2, "traverse_max_m": 40_000})
+    r = client.put(f"{API}/settings", json={"max_gap_days": 2, "traverse_link_m": 40_000})
     assert r.status_code == 200 and r.json()["max_gap_days"] == 2
     assert len(client.get(f"{API}/suggestions").json()[0]["activity_ids"]) == 4
 
@@ -57,9 +57,9 @@ def test_settings_filter_sports_and_tags(make_client):
     ids = traverse(client)
     client.put(f"/api/activities/{ids[1]}/tags", json={"tags": ["Commute"]})
     s = client.get(f"{API}/settings").json()
-    assert s["exclude_tags"] == ["commute"] and s["sports"] == [] and s["traverse_max_m"] == 10_000
-    # the commute is skipped; the remaining days are 2 apart with one empty day between: still linked
-    assert client.get(f"{API}/suggestions").json()[0]["activity_ids"] == [ids[0], ids[2]]
+    assert s["exclude_tags"] == ["commute"] and s["sports"] == [] and s["traverse_link_m"] == 1_000
+    # the commute is skipped, which leaves a 5 km hole in the line: nothing links any more
+    assert client.get(f"{API}/suggestions").json() == []
     client.put(f"{API}/settings", json={"exclude_tags": []})
     assert client.get(f"{API}/suggestions").json()[0]["activity_ids"] == ids
     client.put(f"{API}/settings", json={"exclude_tags": [], "sports": ["cycling"]})  # the tracks are runs
@@ -102,6 +102,14 @@ def test_adventure_stats_and_crud(make_client):
     assert day2["activities"] == 2 and day2["activity_ids"] == ids[1:]
     assert adv["fastest_day"] == day2["date"] and adv["slowest_day"] == day1["date"]
     assert adv["longest_day"] == day2["date"]
+    top = adv["highest_point"]  # synthetic elevation: 100 m + 20 m * sin(km), highest on the longer day
+    assert 115 < top["ele_m"] <= 120 and top["day"] in (1, 2) and top["activity_id"] in ids
+    assert adv["biggest_climb_day"] == max(adv["per_day"], key=lambda d: d["elev_gain_m"])["date"]
+    assert day1["ele_max_m"] is not None
+    for a in adv["activity_list"]:  # values for colouring the map line up with the track
+        assert all(len(a["values"][k]) == len(a["track"]) for k in ("ele", "speed", "hr"))
+        speeds = [v for v in a["values"]["speed"] if v is not None]
+        assert speeds and 2.5 < sorted(speeds)[len(speeds) // 2] < 4.5
     assert abs(adv["avg_per_day"]["distance_m"] - adv["distance_m"] / 2) < 1e-6
     assert abs(adv["avg_per_activity"]["distance_m"] - adv["distance_m"] / 3) < 1e-6
     # members are no longer proposed
@@ -295,3 +303,34 @@ def test_place_lookups_are_stored(make_client, monkeypatch):
     adv = client.post(f"{API}/adventures", json={"name": "x", "activity_ids": ids}).json()
     client.post(f"{API}/adventures/{adv['id']}/place")  # an explicit click always asks again
     assert len(fake.queries) == 3
+
+
+def out_and_back(client, day, north_m=0.0, east_deg=0.0, hour=8):
+    """A 30 min run 2.6 km north and back to its start (``north_m`` north of the origin)."""
+    pts = synthetic_track(start=START + timedelta(days=day, hours=hour - 8))
+    total, lat0 = pts[-1]["dist"], pts[0]["lat"] + north_m / M_PER_DEG_LAT
+    for p in pts:
+        p["lat"] = lat0 + min(p["dist"], total - p["dist"]) / M_PER_DEG_LAT
+        p["lon"] += east_deg
+    return upload(client, f"oab-{day}-{hour}-{north_m}-{east_deg}.gpx", to_gpx(pts, name="Loop"))
+
+
+def test_traverse_needs_a_continuous_line_that_goes_somewhere(make_client):
+    client = make_client(modules="adventures")
+    # loops from one base: every start is at the previous end, but nothing goes anywhere
+    loops = [out_and_back(client, d, east_deg=1.0) for d in (0, 1, 2)]
+    # a chain with a 1.5 km jump before day 3 (a bus ride; still the same area): not one line
+    jump = [act(client, 10), act(client, 11, north_m=LEG_M), act(client, 12, north_m=2 * LEG_M + 1500)]
+    # a traverse with an evening loop from the first camp: still one line
+    trav = [
+        act(client, 20, east_deg=2.0),
+        out_and_back(client, 20, north_m=LEG_M, east_deg=2.0, hour=18),
+        act(client, 21, north_m=LEG_M, east_deg=2.0),
+    ]
+    got = {tuple(s["activity_ids"]): s for s in client.get(f"{API}/suggestions").json()}
+    assert got[tuple(loops)]["type"] == "multiday" and got[tuple(loops)]["max_gap_m"] < 50
+    assert got[tuple(jump)]["type"] == "multiday" and 1400 < got[tuple(jump)]["max_gap_m"] < 1600
+    assert got[tuple(trav)]["type"] == "traverse"
+    client.put(f"{API}/settings", json={"traverse_link_m": 2000})
+    got = {tuple(s["activity_ids"]): s["type"] for s in client.get(f"{API}/suggestions").json()}
+    assert got[tuple(jump)] == "traverse"  # with a 2 km allowance the jump is bridged

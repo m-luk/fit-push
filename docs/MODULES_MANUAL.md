@@ -52,14 +52,17 @@ long ago). Clicking a route opens that activity.
 
 Groups several activities into one **adventure** and shows them together: one map,
 totals for the whole trip, a row per day, the fastest and slowest day (by average
-speed), the longest and shortest day, and averages per day and per activity.
+speed), the longest and shortest day, the highest point, the day with the biggest climb,
+and averages per day and per activity.
 
 There are two types:
 
-- **Traverse**: a chain of tracks, each day continuing near where an earlier one ended
-  (a bikepacking trip, a long-distance hike).
-- **Multi-day**: several outings from the same base on consecutive days (a ski week,
-  a climbing trip from a hut).
+- **Traverse**: one continuous line that goes somewhere (a bikepacking trip, a
+  long-distance hike): every activity starts where the previous one ended (within 1 km by
+  default), and at least half of them end away from where they started. A loop from the
+  camp in between is fine; a gap such as a bus ride makes it multi-day.
+- **Multi-day**: every other trip: outings from one base on consecutive days (a ski week,
+  a climbing trip from a hut), or moving between places with gaps.
 
 The module also looks through your activities and **proposes** adventures it finds.
 Activities of different sports can be mixed, and activities tagged `#commute` are
@@ -83,9 +86,13 @@ left out unless you change that.
 3. To build one by hand, click **New adventure**, enter a name, then tick the activities
    in the list that opens. Change **from** / **to** to see other dates, and click
    **Save**.
-4. In an adventure, the tiles show the totals. **Colour by** switches the map between
-   **Activity** (each activity its own colour, in day order), **Day** (one colour per
-   day) and **Total** (the whole route in one colour). Click **Day 1**, **Day 2**, … or
+4. In an adventure, the tiles show the totals, the **Highest point**, the **Longest day**
+   and the **Biggest climb** (most elevation gain in one day). **Colour by** switches the
+   map between **Activity** (each activity its own colour, in day order), **Day** (one
+   colour per day) and **Total** (the whole route in one colour), or, like the activity
+   map, colours the route by **Elevation**, **Speed** (**Pace** for running and walking) or
+   **Heart rate**, light to dark from low to high (the legend shows the range). A measure
+   with no data is greyed out. Click **Day 1**, **Day 2**, … or
    a row of the **Per day** table to focus the map on one day; **All days** shows
    everything again. Click a route to open the activity.
 5. Use the **Traverse** / **Multi-day** buttons to change the type, **Rename** to change
@@ -95,9 +102,11 @@ left out unless you change that.
 6. Click **Detection settings** on the Adventures page to change what is proposed:
    - **Max days without activity between days** (default 1): how many empty days may
      lie between two days of one adventure.
-   - **Traverse: next start within … of an end** (default 10 km): how close a start must
-     be to where an earlier activity ended.
-   - **Multi-day: starts within … of the base** (default 2 km).
+   - **Traverse: each start within … of the previous end** (default 1 km): how close an
+     activity must start to where the previous one ended for the trip to count as one
+     continuous line.
+   - **Same place: a start within … of an earlier start or end** (default 2 km): how near
+     an activity must start to the trip so far to belong to it.
    - **Minimum days** (default 2).
    - **Ignore home** (default 8 weeks): a place where you start activities in this many
      different weeks counts as home and does not link activities, so your everyday
