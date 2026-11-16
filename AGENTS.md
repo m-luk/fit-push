@@ -33,6 +33,7 @@ reading `app/`; that keeps the context small and the core safe.
 python scripts/run.py                    # venv + deps, then serve http://127.0.0.1:8000 (core + modules)
 python scripts/run.py --core-only        # core only (any `python -m app` option passes through)
 python scripts/run.py --tests            # pytest: core (twice: core-only + all modules) + module tests
+python scripts/devapp.py install         # "fit-push (dev)" Start/app-menu launcher: this repo, --reload --desktop
 python scripts/modules.py check          # module rules + generated docs up to date
 python scripts/modules.py docs           # regenerate modules/INDEX.md + docs/MODULES_MANUAL.md
 ruff check . && ruff format --check .    # lint + format (config in pyproject.toml)

@@ -60,7 +60,7 @@ def main() -> int:
         return 1
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--host", default="127.0.0.1")
-    ap.add_argument("--port", type=int, default=8000)
+    ap.add_argument("--port", type=int, help="port (default 8000)")
     ap.add_argument("--reload", action="store_true", help="restart when Python files change")
     ap.add_argument("--tests", action="store_true", help="run pytest instead of the app")
     args, extra = ap.parse_known_args()
@@ -72,10 +72,13 @@ def main() -> int:
         cmd = [str(py), "-m", "pytest", "-q", *extra]
     else:
         # Everything else (--core-only, --modules, --data-dir, --db, --no-backup, --restore, ...) goes to the app.
-        cmd = [str(py), "-m", "app", "--host", args.host, "--port", str(args.port), *extra]
+        # --port only when given, so `--desktop` can reuse a running instance / pick a free port.
+        cmd = [str(py), "-m", "app", "--host", args.host, *extra]
+        if args.port is not None:
+            cmd += ["--port", str(args.port)]
         if args.reload:
             cmd.append("--reload")
-        print(f"fit-push on http://{args.host}:{args.port}  (Ctrl+C to stop)", flush=True)
+        print("Starting fit-push (Ctrl+C to stop) ...", flush=True)
     try:
         return subprocess.call(cmd, cwd=ROOT)
     except KeyboardInterrupt:

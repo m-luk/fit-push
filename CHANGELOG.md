@@ -8,6 +8,17 @@ How to update it: see "Changelog" in `AGENTS.md`.
 
 ## [Unreleased]
 
+### Added
+
+- The desktop app opens fit-push in its own window with the fit-push name and icon (app
+  mode of Edge, Chrome or Brave) instead of a browser tab; `--no-app-window` keeps the
+  tab. The window's title bar follows the light/dark theme.
+- Developers can add a **fit-push (dev)** launcher to the Start menu / app menu with
+  `python scripts/devapp.py install`: it starts the working copy with auto-reload and
+  opens the browser, like the desktop app.
+- `python -m app --desktop` gives a run from source the desktop app's behaviour: open the
+  browser, reuse a running instance, fall back to a free port.
+
 ### Removed
 
 - Support for Python 3.10 and 3.11 when running from source: fit-push now needs Python

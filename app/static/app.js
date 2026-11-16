@@ -106,8 +106,12 @@
   // ------------------------------------------------------------------ theme & units controls
   function applyTheme(t) {
     if (t) document.documentElement.dataset.theme = t; else delete document.documentElement.dataset.theme;
+    // title bar of an app window / installed app follows the top bar
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.content = css("--surface-1");
   }
   applyTheme(lsGet("theme"));
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => applyTheme(lsGet("theme")));
   $("#theme-btn").addEventListener("click", () => {
     const dark = document.documentElement.dataset.theme
       ? document.documentElement.dataset.theme === "dark"
