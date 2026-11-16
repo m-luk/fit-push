@@ -126,7 +126,8 @@ left out unless you change that.
   proposal shown on the Adventures page (each place is looked up once and remembered),
   and when you click **Find place**. If you click **Create** before the place is found,
   the name comes from the type and dates. Turn off **Use OpenStreetMap for place
-  names** in the detection settings to never send anything. The lookup needs an internet
+  names** in the detection settings to never send anything. Place names need the
+  **OpenStreetMap places** module (loaded by default); without it the option is greyed out. The lookup needs an internet
   connection and can take a few seconds; national parks are found when the route's
   middle is inside one or within 25 km of its centre, mountain ranges when it is inside
   one or within 60 km of where OpenStreetMap places the range (often a label point or a
@@ -143,7 +144,7 @@ left out unless you change that.
 
 ## Gear
 
-*Module `gear` v0.4.0 · owner @m-luk*
+*Module `gear` v0.4.1 · owner @m-luk*
 
 
 ### What it does
@@ -189,9 +190,39 @@ sports (e.g. All cycling), and every new activity of that sport gets it automati
 - Trimmed copies (clips) get the default gear of their sport, not the gear of the
   original activity.
 
+## OpenStreetMap places
+
+*Module `osm_places` v0.1.0 · owner @m-luk*
+
+
+### What it does
+
+Finds the national park, the mountain range and the nearest city or town around a place
+on your activities, using OpenStreetMap. It has no page of its own: other modules use it,
+for example **Adventures** to name a trip "2026-07 Tatra National Park, Zakopane".
+
+### How to use
+
+1. Nothing to set up. Keep this module enabled (it is by default) for the modules that
+   use it to show place names; the **Modules** page lists it as loaded.
+2. Turn lookups on or off in the module that uses them (for Adventures:
+   **Detection settings** → **Use OpenStreetMap for place names**).
+3. To stop all lookups at once, start fit-push without this module, for example
+   `python scripts/run.py --modules adventures,gear` (every module except this one).
+
+### Limitations
+
+- Needs an internet connection; a lookup takes a few seconds and runs at most once per
+  second.
+- Each lookup sends one point, rounded to about 100 m, to the OpenStreetMap Overpass API.
+  Answers are remembered per point, so the same place is not asked again.
+- OpenStreetMap often maps a mountain range as a label point or a ridge line, so a large
+  range may be missed or a neighbouring one chosen; parks are found when the point is
+  inside one or within 25 km of its centre.
+
 ## Strava import
 
-*Module `strava_import` v0.1.0 · owner @m-luk*
+*Module `strava_import` v0.1.1 · owner @m-luk*
 
 
 ### What it does

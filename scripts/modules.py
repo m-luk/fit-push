@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Module tooling: scaffold, check and document fit-push modules.
 
-    python scripts/modules.py new <id> --owner <github-id> --name "Nice name" [--provides page,api]
+    python scripts/modules.py new <id> --owner <github-id> --name "Nice name" [--provides page,api|service]
     python scripts/modules.py check [<id> ...]      # all modules when no id is given
     python scripts/modules.py docs                  # regenerate modules/INDEX.md and docs/MODULES_MANUAL.md
     python scripts/modules.py list
@@ -128,8 +128,57 @@ def _check_frontend(path: Path, module_id: str) -> list[str]:
     return errs
 
 
-def check_module(info) -> tuple[list[str], list[str]]:
-    """(errors, warnings) for one module."""
+PROVIDE_RE = re.compile(r"ctx\.provide\(\s*[\"'](\w+)[\"']")
+SERVICE_CALL_RE = re.compile(r"ctx\.service\(\s*[\"'](\w+)[\"']\s*,\s*[\"'](\w+)[\"']")
+
+
+def _check_services(info, by_id: dict) -> tuple[list[str], list[str]]:
+    """The service contract (docs/SDK.md, "Services"): a provider declares, implements and
+    documents every service; a consumer declares what it calls (``uses``), and that must
+    match what the provider in this repository offers, major version included."""
+    errs: list[str] = []
+    warns: list[str] = []
+    m = info.manifest
+    declared: dict = m.get("services") or {}
+    backend = info.dir / "backend.py"
+    src = backend.read_text(encoding="utf-8") if backend.is_file() else ""
+    provided = set(PROVIDE_RE.findall(src))
+    for name in sorted(provided - set(declared)):
+        errs.append(f'ctx.provide("{name}") is not declared in module.json "services"')
+    for name in sorted(set(declared) - provided):
+        errs.append(f'service {name!r} is declared but backend.py never calls ctx.provide("{name}", ...)')
+    if declared:
+        readme = info.dir / "README.md"
+        body = _sections(readme.read_text(encoding="utf-8")).get("Services", "") if readme.is_file() else ""
+        if not body:
+            errs.append("README.md needs a '## Services' section documenting every service (signature, result, errors)")
+        for name in sorted(declared):
+            if body and f"`{name}(" not in body:
+                errs.append(f"README.md '## Services' does not document `{name}(...)`")
+    uses: dict = m.get("uses") or {}
+    for mid, name in sorted(set(SERVICE_CALL_RE.findall(src))):
+        if name not in (uses.get(mid) or {}):
+            errs.append(f'ctx.service("{mid}", "{name}") is not declared in module.json "uses"')
+    for mid, names in sorted(uses.items()):
+        provider = by_id.get(mid)
+        if provider is None:
+            warns.append(f"uses {mid}, which is not in this repository (calls return None without it)")
+            continue
+        offered: dict = provider.manifest.get("services") or {}
+        for name, major in sorted((names or {}).items()):
+            if name not in offered:
+                errs.append(f"uses {mid}.{name}, but {mid} does not declare that service")
+            elif int(str(offered[name]).split(".")[0]) != major:
+                errs.append(f"uses {mid}.{name} major {major}, but {mid} provides {offered[name]}")
+    if not {"page", "activity-card"} & set(m.get("provides", [])) and (info.dir / "frontend.js").is_file():
+        errs.append(
+            "frontend.js registers pages/cards: add page or activity-card to provides (a service module has no UI)"
+        )
+    return errs, warns
+
+
+def check_module(info, by_id: dict | None = None) -> tuple[list[str], list[str]]:
+    """(errors, warnings) for one module; ``by_id`` (all modules) checks ``uses`` against providers."""
     folder, errs, warns = info.dir, [], []
     if info.status == "error" and not info.manifest:
         return info.errors, warns
@@ -138,6 +187,11 @@ def check_module(info) -> tuple[list[str], list[str]]:
         errs.append("module.json contains an e-mail address; use GitHub ids only")
     errs += _check_doc(folder / "README.md", README_SECTIONS)
     errs += _check_doc(folder / "MANUAL.md", MANUAL_SECTIONS)
+    if by_id is None:
+        by_id = {i.id: i for i in discover(folder.parent)}
+    s_errs, s_warns = _check_services(info, by_id)
+    errs += s_errs
+    warns += s_warns
     if (folder / "backend.py").is_file():
         errs += _check_backend(folder / "backend.py", info.id)
     if (folder / "frontend.js").is_file():
@@ -170,13 +224,15 @@ def check_module(info) -> tuple[list[str], list[str]]:
 
 
 def cmd_check(ids: list[str]) -> int:
-    infos = [i for i in discover() if not ids or i.id in ids]
+    every = discover()
+    by_id = {i.id: i for i in every}
+    infos = [i for i in every if not ids or i.id in ids]
     if ids and len(infos) != len(ids):
         print("unknown module(s):", ", ".join(set(ids) - {i.id for i in infos}))
         return 2
     failed = 0
     for info in infos:
-        errs, warns = check_module(info)
+        errs, warns = check_module(info, by_id)
         print(f"{'FAIL' if errs else 'ok  '} {info.id}")
         for e in errs:
             print(f"     ✗ {e}")
@@ -192,6 +248,19 @@ def cmd_check(ids: list[str]) -> int:
 
 
 # ----------------------------------------------------------------------------- docs
+def _provides_cell(m: dict) -> str:
+    out = [p for p in m.get("provides", []) if p != "service"]
+    services = m.get("services") or {}
+    if services:
+        out.append("service: " + ", ".join(f"`{k}` {v}" for k, v in sorted(services.items())))
+    return ", ".join(out)
+
+
+def _uses_cell(m: dict) -> str:
+    uses = m.get("uses") or {}
+    return ", ".join(f"`{mid}.{k}` {v}" for mid, names in sorted(uses.items()) for k, v in sorted(names.items())) or "–"
+
+
 def render_index() -> str:
     rows = []
     for i in discover():
@@ -200,7 +269,7 @@ def render_index() -> str:
         rows.append(
             f"| [{i.id}]({i.id}/README.md) | {m.get('name', '?')} | {m.get('version', '?')} | "
             f"[@{owner}](https://github.com/{owner}) | {m.get('summary', '')} | "
-            f"{', '.join(m.get('provides', []))} | [manual]({i.id}/MANUAL.md) |"
+            f"{_provides_cell(m)} | {_uses_cell(m)} | [manual]({i.id}/MANUAL.md) |"
         )
     return "\n".join(
         [
@@ -210,8 +279,8 @@ def render_index() -> str:
             f"Modules installed in this repository (SDK {SDK_VERSION}). Each row comes from the module's",
             "`module.json`; regenerate with `python scripts/modules.py docs`. Rules: [RULES.md](RULES.md).",
             "",
-            "| Id | Name | Version | Owner | Summary | Provides | Manual |",
-            "|---|---|---|---|---|---|---|",
+            "| Id | Name | Version | Owner | Summary | Provides | Uses | Manual |",
+            "|---|---|---|---|---|---|---|---|",
             *rows,
             "",
         ]
@@ -284,8 +353,29 @@ def cmd_new(module_id: str, owner: str, name: str, provides: list[str]) -> int:
         (folder / rel).write_text(text, encoding="utf-8", newline="\n")
     if "page" not in provides and "activity-card" not in provides:
         (folder / "frontend.js").unlink()
-    if "api" not in provides and "events" not in provides:
+    if not {"api", "events", "service"} & set(provides):
         (folder / "backend.py").unlink()
+    if "service" in provides:  # a service module: declare, implement and document one service to start
+        manifest = json.loads((folder / "module.json").read_text(encoding="utf-8"))
+        manifest["services"] = {"example": "1.0"}
+        (folder / "module.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8", newline="\n")
+        readme = folder / "README.md"
+        readme.write_text(
+            readme.read_text(encoding="utf-8").replace(
+                "\n## Data",
+                "\n## Services\n\nTODO: each service as `name(args) -> result` (version, errors, what it may "
+                'send or store). See docs/SDK.md, "Services".\n\n## Data',
+            ),
+            encoding="utf-8",
+            newline="\n",
+        )
+        backend = folder / "backend.py"
+        backend.write_text(
+            backend.read_text(encoding="utf-8").rstrip()
+            + '\n\n    ctx.provide("example", lambda: {"ok": True})  # TODO replace; keep module.json "services" in step\n',
+            encoding="utf-8",
+            newline="\n",
+        )
     print(f"created {folder}. Next: fill README.md (intent) FIRST, then code, tests and MANUAL.md;")
     print(f"then: python scripts/modules.py check {module_id} && python scripts/modules.py docs")
     return 0
@@ -298,7 +388,7 @@ def main() -> int:
     n.add_argument("id")
     n.add_argument("--owner", required=True, help="GitHub user id of the owner")
     n.add_argument("--name", required=True)
-    n.add_argument("--provides", default="page,api", help="comma list of page, activity-card, api, events")
+    n.add_argument("--provides", default="page,api", help="comma list of page, activity-card, api, events, service")
     c = sub.add_parser("check", help="validate modules")
     c.add_argument("ids", nargs="*")
     sub.add_parser("docs", help="regenerate modules/INDEX.md and docs/MODULES_MANUAL.md")

@@ -1638,6 +1638,8 @@
           <h2><span>${esc(m.name)} <span class="muted" style="font-weight:400">v${esc(m.version || "?")}</span></span>${badge(m)}</h2>
           <p>${esc(m.summary || "")}</p>
           <p class="muted">Owner ${owner(m)}${m.maintainers?.length ? ` · maintainers ${m.maintainers.map((x) => `@${esc(x)}`).join(", ")}` : ""} · provides ${esc((m.provides || []).join(", "))}</p>
+          ${Object.keys(m.services || {}).length ? `<p class="muted">Services: ${Object.entries(m.services).map(([k, v]) => `<code>${esc(k)}</code> ${esc(v)}`).join(", ")}</p>` : ""}
+          ${Object.keys(m.uses || {}).length ? `<p class="muted">Uses: ${Object.entries(m.uses).flatMap(([mid, s]) => Object.entries(s).map(([k, v]) => `<code>${esc(mid)}.${esc(k)}</code> ${esc(v)}.x`)).join(", ")}</p>` : ""}
           ${m.errors?.length ? `<div class="module-error">${m.errors.map(esc).join("<br>")}</div>` : ""}
           <a class="btn small" href="#/modules/${esc(m.id)}">Manual &amp; intent</a></div>`).join("")}</div>`
           : `<div class="card"><p class="muted">No modules installed. See <code>modules/RULES.md</code> to create one.</p></div>`}

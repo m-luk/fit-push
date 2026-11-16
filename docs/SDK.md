@@ -1,4 +1,4 @@
-# fit-push module SDK (version 1.2)
+# fit-push module SDK (version 1.3)
 
 Everything a module may use from the core. If you need something that is not here,
 do not reach into `app/` internals: propose an SDK addition as a separate core change
@@ -29,8 +29,8 @@ error shows on the Modules page; the core keeps running.
 | `ctx.db` | `ModuleDB`, see below |
 | `ctx.on(event, handler)` | call `handler(**payload)` after a core event |
 | `ctx.log` | `logging.Logger` named `fitpush.module.<id>` |
-| `ctx.provide(name, fn)` | offer `fn` to other modules as a service *(1.1)* |
-| `ctx.service(module_id, name)` | another module's service, or `None` when that module is not loaded *(1.1)* |
+| `ctx.provide(name, fn)` | offer `fn` to other modules as a service *(1.1)*; see "Services between modules" |
+| `ctx.service(module_id, name, major=None)` | another module's service, or `None` when it is not loaded or has another major *(1.1, major 1.3)* |
 
 ### `ctx.core` (CoreAPI)
 
@@ -55,21 +55,46 @@ HTTP 404 / 422.
 
 `peek_file` and `import_file` raise `Invalid` for files the core cannot read.
 
-### Services between modules *(1.1)*
+### Services between modules *(1.1; versions and `uses` 1.3)*
 
-A module can let others use one of its functions without them touching its tables:
+A **service** is a function one module offers to others. They call it in-process, through
+the SDK, without touching its tables or HTTP API. Services are versioned and declared
+in `module.json` on both sides, so a change on one side cannot silently break the other,
+and `scripts/modules.py check` cross-checks them.
+
+| Side | `module.json` | Backend |
+|---|---|---|
+| provider | `"provides": [..., "service"]`, `"services": {"place": "1.0"}` (name -> `MAJOR.MINOR`) | `ctx.provide("place", fn)` for every declared name |
+| consumer | `"uses": {"osm_places": {"place": 1}}` (module -> {service: major}) | `fn = ctx.service("osm_places", "place")` when needed |
+
+| Call | Returns |
+|---|---|
+| `ctx.provide(name, fn)` | offers `fn`; an undeclared name works but is logged and fails the check |
+| `ctx.service(module_id, name, major=None)` | the function, or `None` when the module is not loaded, does not offer it, or offers another major than `major` / the consumer's `uses` *(major check 1.3)* |
+| `ctx.service_version(module_id, name)` | `"MAJOR.MINOR"` of a loaded service (`"0.0"` if undeclared), or `None` *(1.3)* |
 
 ```python
-ctx.provide("assign", assign)  # in module "gear"
-assign = ctx.service("gear", "assign")  # in another module, when needed
-if assign:  # None: gear is not loaded
-    assign(activity_id, gear_id)
+fn = ctx.service("gear", "ensure")  # in strava_import; module.json: "uses": {"gear": {"ensure": 1}}
+if fn is None:  # gear not loaded, or not a 1.x gear: degrade gracefully
+    ...
 ```
 
-Look services up when you use them, not in `register` (load order is only guaranteed
-for modules listed in `depends`). Errors raised by a service propagate to the caller,
-so call them where your own errors are contained (a route or an event handler). A
-provider documents its services in its README; treat them as part of its contract.
+Rules for services (kinds of modules and the change workflow: see **Module kinds** and
+**Service API workflow** below):
+
+- Look them up when you use them, not in `register`. Load order is only guaranteed for
+  modules listed in `depends`. A soft dependency (works without the provider) belongs
+  in `uses` only; a hard one in `depends` *and* `uses`.
+- Call them where your own errors are contained (a route or an event handler). Errors
+  raised by a service propagate to the caller. Providers raise `Invalid` / `NotFound`
+  for bad input and failed work, never `HTTPException`.
+- Arguments and results are plain JSON-like values (numbers, strings, lists, dicts), never
+  database rows, numpy values or objects, so a service can later also be offered over
+  HTTP unchanged.
+- The provider documents each service in a `## Services` section of its README, as
+  `` `name(args) -> result` `` with version, result shape, errors and what it sends or
+  stores. That section is the contract. The checker requires it, and lists who uses each
+  service in `modules/INDEX.md`.
 
 ### Events
 
@@ -156,6 +181,48 @@ Reuse the core's CSS classes (`card`, `page-head`, `sub`, `tiles/tile`, `btn`,
 classes with a short module prefix (e.g. `am-` for activity_map) and use tokens for
 every colour, so light and dark themes both work.
 
+## Module kinds
+
+| Kind | `provides` | Has | Example |
+|---|---|---|---|
+| **feature module** | `page`, `activity-card`, `api`, `events` (any) | UI and/or HTTP API for users | `gear`, `adventures` |
+| **service module** | `service` (+ `events` if it reacts to core events) | no page, no card, no HTTP API; only services for other modules | `osm_places` |
+
+A feature module may also offer services (`gear` offers `ensure`, `assign`,
+`add_defaults` to importers), and then lists `service` and `services` too. A service
+module is the place for a capability that several modules need and that should exist
+**once**: anything that talks to an external service, a shared computation, or a shared
+cache. It has no `frontend.js` and no routes; users see it on the **Modules** page,
+where its manual says what it does and how to switch it off. Scaffold one with
+`python scripts/modules.py new <id> --owner <gh> --name "..." --provides service`.
+
+## Service API workflow
+
+How a service is born and changed. Both sides are checked, so follow the order:
+
+1. **Propose.** Write the provider README's `## Services` entry first: signature, result
+   shape, errors, privacy (what leaves the machine, what is stored). Start at `1.0`.
+2. **Declare.** Add it to the provider's `services`, implement it with `ctx.provide`, and
+   test it in the provider's tests (call it via `client.app.state.module_services[id][name]`;
+   fake any external service, never reach it from tests).
+3. **Use.** In the consumer, declare it in `uses` with the major, call it through
+   `ctx.service(...)`, and handle `None` (module missing or another major) with a clear
+   message or a fallback. Test both: with the provider loaded
+   (`make_client(modules="consumer,provider")`) and without it.
+4. **Change, compatibly** (minor, `1.0` -> `1.1`): new optional arguments with defaults,
+   new keys in a result dict, new error cases that consumers already handle as
+   `Invalid`. Consumers keep working without changes.
+5. **Change, breaking** (major, `1.x` -> `2.0`): renaming or removing an argument or key,
+   changing a meaning or unit. Consumers that declared major 1 now get `None`. In the
+   same change either update every consumer in the repository (the checker lists
+   mismatches), or keep the old behaviour under a new name (`place_v1`, declared `1.x`)
+   until they move, then remove it with a major bump.
+6. **Record it.** Bump the provider's module `version`, note the change in its README and
+   in `CHANGELOG.md` when users notice it, and run `python scripts/modules.py check`.
+
+Later improvements fit this scheme without breaking modules: an HTTP view of services
+(JSON in and out is already required), per-service permissions, or several majors of
+one service side by side.
 ## Testing
 
 `modules/<id>/tests/test_<id>.py` with the shared fixtures:

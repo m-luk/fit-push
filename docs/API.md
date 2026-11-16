@@ -29,6 +29,6 @@ Interactive documentation is served at `/docs` while the app runs.
 | `POST` | `/api/tutorial` | create (or reuse) the tutorial run: `{activity_id, created}` |
 | `DELETE` | `/api/tutorial` | remove the tutorial run, clips of it and segments made on them |
 | `GET` | `/api/version` | `{app: "fit-push", version}` (identifies a running instance) |
-| `GET` | `/api/modules` | modules with owner, status and errors |
+| `GET` | `/api/modules` | modules with owner, status, errors, `provides`, `services` (name -> version) and `uses` |
 | `GET` | `/api/modules/{id}/docs/readme\|manual` | a module's intent / manual (Markdown) |
 | `*` | `/api/m/{module id}/...` | module APIs (see each module's README) |

@@ -23,6 +23,23 @@ How to update it: see "Changelog" in `AGENTS.md`.
   continuous line (each start within 1 km of the previous end, mostly point-to-point);
   other trips are multi-day. Tiles show the highest point, the longest day and the
   biggest climb, and the map can also be coloured by elevation, speed or heart rate.
+  Place names need the **OpenStreetMap places** module.
+- **OpenStreetMap places** module: a service module (no page) that finds the national
+  park, mountain range and nearest town around a point for other modules. It sends one
+  point rounded to about 100 m per new place, remembers every answer and makes at most
+  one request per second.
+- Module developers: **service modules** (`--provides service`) and versioned services
+  (SDK 1.3). Providers declare `services` with versions and document them in a README
+  `## Services` section; consumers declare `uses` with the major version they need and
+  get `None` from `ctx.service()` for another major (`ctx.service_version()` is new).
+  `scripts/modules.py check` cross-checks both sides, the registry lists them, and the
+  **Modules** page shows each module's services and uses. The service change workflow is
+  in docs/SDK.md.
+
+### Changed
+
+- **Gear** module: its services for importers (`ensure`, `assign`, `add_defaults`) are
+  declared as version 1.0; **Strava import** declares that it uses them.
 
 ## [0.4.0] - 2026-11-16
 

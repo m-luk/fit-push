@@ -190,3 +190,84 @@ def test_module_services_and_core_actions(make_client, tmp_path):
     assert r["peek"]["start_time"] == client.get(f"/api/activities/{r['first']['id']}").json()["start_time"]
     assert r["act"]["name"] == "Renamed" and r["act"]["sport"] == "hiking"
     assert r["bad"] is True
+
+
+def test_service_versions_and_uses(make_client, tmp_path):
+    """Service modules declare versioned services; consumers get them only for the major
+    they declared in ``uses`` (or asked for), and None otherwise."""
+    mods = tmp_path / "mods"
+    _write_module(
+        mods,
+        "lib",
+        "def register(ctx):\n    ctx.provide('greet', lambda n: f'hi {n}')\n    ctx.provide('old', lambda: 1)\n",
+        {"provides": ["service"], "services": {"greet": "2.1", "old": "1.0"}},
+    )
+    consumer = """
+        def register(ctx):
+            @ctx.router.get("/svc")
+            def svc():
+                greet = ctx.service("lib", "greet")
+                return {
+                    "greet": greet("x") if greet else None,
+                    "as_v1": ctx.service("lib", "greet", major=1) is None,
+                    "version": ctx.service_version("lib", "greet"),
+                    "old": ctx.service("lib", "old") is not None,
+                }
+        """
+    _write_module(mods, "new_user", consumer, {"uses": {"lib": {"greet": 2, "old": 1}}})
+    _write_module(mods, "old_user", consumer, {"uses": {"lib": {"greet": 1}}})
+    client = make_client(modules="all", modules_dir=mods)
+    assert client.get("/api/m/new_user/svc").json() == {"greet": "hi x", "as_v1": True, "version": "2.1", "old": True}
+    assert client.get("/api/m/old_user/svc").json()["greet"] is None  # written for 1.x, lib is 2.x
+    lib = next(m for m in client.get("/api/modules").json() if m["id"] == "lib")
+    assert lib["services"] == {"greet": "2.1", "old": "1.0"} and lib["status"] == "loaded"
+
+
+def test_service_manifest_validation(tmp_path):
+    from app.modules import validate_manifest
+
+    def errors(**extra):
+        _write_module(tmp_path, f"m{len(list(tmp_path.iterdir()))}", "def register(ctx):\n    pass\n", extra)
+        d = sorted(tmp_path.iterdir(), key=lambda p: p.stat().st_mtime)[-1]
+        return validate_manifest(json.loads((d / "module.json").read_text(encoding="utf-8")), d)
+
+    assert errors(provides=["service"], services={"place": "1.0"}) == []
+    assert any("must declare" in e for e in errors(provides=["service"]))  # service without services
+    assert any("must declare" in e for e in errors(services={"place": "1.0"}))  # services without "service"
+    assert any("MAJOR.MINOR" in e for e in errors(provides=["service"], services={"place": "1"}))
+    assert any("uses must map" in e for e in errors(uses={"lib": {"x": "1"}}))
+    assert errors(uses={"lib": {"x": 1}}) == []
+
+
+def test_checker_matches_providers_and_consumers(tmp_path):
+    lib = """
+        def register(ctx):
+            ctx.provide("place", lambda lat, lon: {})
+            ctx.provide("secret", lambda: 1)
+        """
+    _write_module(tmp_path, "lib", lib, {"provides": ["service"], "services": {"place": "2.0", "gone": "1.0"}})
+    (tmp_path / "lib" / "README.md").write_text("# x\n\n## Services\n\n- `place(lat, lon)` ...\n", encoding="utf-8")
+    use = "def register(ctx):\n    ctx.service('lib', 'place')\n    ctx.service('lib', 'other')\n"
+    _write_module(tmp_path, "app_one", use, {"uses": {"lib": {"place": 1}, "nowhere": {"x": 1}}})
+    infos = {i.id: i for i in discover(tmp_path)}
+    lib_errs, _ = cli._check_services(infos["lib"], infos)
+    assert any('ctx.provide("secret")' in e for e in lib_errs)  # provided but not declared
+    assert any("'gone' is declared but" in e for e in lib_errs)  # declared but not provided
+    assert any("`gone(...)`" in e for e in lib_errs)  # not documented
+    errs, warns = cli._check_services(infos["app_one"], infos)
+    assert any("uses lib.place major 1, but lib provides 2.0" in e for e in errs)
+    assert any('ctx.service("lib", "other") is not declared' in e for e in errs)
+    assert any("nowhere" in w for w in warns)
+
+
+def test_scaffold_service_module(tmp_path, monkeypatch):
+    monkeypatch.setattr(cli, "DEFAULT_DIR", tmp_path)
+    assert cli.cmd_new("my_lib", "someone", "My lib", ["service"]) == 0
+    d = tmp_path / "my_lib"
+    assert not (d / "frontend.js").exists() and (d / "backend.py").is_file()
+    manifest = json.loads((d / "module.json").read_text(encoding="utf-8"))
+    assert manifest["services"] == {"example": "1.0"}
+    assert "## Services" in (d / "README.md").read_text(encoding="utf-8")
+    info = next(i for i in discover(tmp_path) if i.id == "my_lib")
+    errors, _ = cli.check_module(info)
+    assert any("placeholders" in e for e in errors) and not any("ctx.provide" in e for e in errors)

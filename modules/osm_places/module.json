@@ -1,0 +1,20 @@
+{
+  "id": "osm_places",
+  "name": "OpenStreetMap places",
+  "version": "0.1.0",
+  "summary": "Service for other modules: national park, mountain range and nearest town around a point, from OpenStreetMap",
+  "owner": {
+    "github": "m-luk"
+  },
+  "maintainers": [],
+  "sdk": "1",
+  "provides": [
+    "service"
+  ],
+  "services": {
+    "place": "1.0",
+    "about": "1.0"
+  },
+  "depends": [],
+  "enabled_by_default": true
+}

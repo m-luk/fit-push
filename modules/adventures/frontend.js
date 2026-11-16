@@ -56,6 +56,8 @@
     let sugg = null, advs = [], cfg = null, seq = 0; // sugg: null while detection runs
     // expanded proposal keys; looked-up places by proposal key (a place, or {error} when the lookup failed)
     const open = new Set(), places = new Map();
+    // place names need the osm_places service module and the user's consent (the setting)
+    const osmOn = () => cfg.osm_names && cfg.osm_available;
 
     // Saved adventures show at once; detection and the place lookups follow in the background.
     async function load() {
@@ -74,7 +76,7 @@
     // Names for the proposals, one lookup at a time (the server keeps every result, so a place is
     // looked up once); each answer only updates its own row, so open previews stay as they are.
     async function prefetchPlaces(mine) {
-      if (!cfg.osm_names) return;
+      if (!osmOn()) return;
       for (const s of sugg) {
         if (places.has(s.key)) continue;
         try { places.set(s.key, await send("/place", "POST", { activity_ids: s.activity_ids })); }
@@ -86,7 +88,7 @@
 
     const placeHtml = (key) => {
       const pl = places.get(key);
-      if (!cfg.osm_names) return "";
+      if (!osmOn()) return "";
       if (!pl) return '<span class="muted">finding place…</span>';
       if (pl.error) return '<span class="muted">place not found</span>';
       return pl.name ? `📍 ${esc(placeText(pl))}` : '<span class="muted">no park or town nearby</span>';
@@ -125,7 +127,7 @@
         <div class="adv-preview" data-preview="${esc(s.key)}"></div>
         <div class="adv-unfold-list"><table class="adv-table"><tbody>${s.activities.map((a) => `<tr><td>${esc(day(a.start_time))}</td>
           <td>${esc(sdk.sports.icon(a.sport))} <a href="#/activity/${a.id}">${esc(a.name)}</a></td><td class="num">${dist(a.distance_m)}</td></tr>`).join("")}</tbody></table>
-          ${cfg.osm_names ? `<div class="adv-place"><button type="button" class="btn small" data-act="place" title="Look the place up again on OpenStreetMap">Find place again</button> <span class="adv-small" data-place="${esc(s.key)}">${placeHtml(s.key)}</span></div>` : ""}</div></div></td></tr>`;
+          ${osmOn() ? `<div class="adv-place"><button type="button" class="btn small" data-act="place" title="Look the place up again on OpenStreetMap">Find place again</button> <span class="adv-small" data-place="${esc(s.key)}">${placeHtml(s.key)}</span></div>` : ""}</div></div></td></tr>`;
     }
 
     async function drawPreviews() {
@@ -158,7 +160,8 @@
           <label>Ignore home (a place used in this many weeks; 0 = off) <input name="home_weeks" type="number" min="0" step="1" value="${cfg.home_weeks}"></label>
           <label>Excluded tags (comma-separated) <input name="exclude_tags" value="${esc(cfg.exclude_tags.join(", "))}" placeholder="commute"></label>
         </div>
-        <label class="adv-check"><input type="checkbox" name="osm_names"${cfg.osm_names ? " checked" : ""}> Use OpenStreetMap for place names
+        <label class="adv-check"><input type="checkbox" name="osm_names"${cfg.osm_names ? " checked" : ""}${cfg.osm_available ? "" : " disabled"}> Use OpenStreetMap for place names
+          ${cfg.osm_available ? "" : '<span class="adv-small">(needs the <b>OpenStreetMap places</b> module, which is not loaded)</span>'}
           <span class="muted adv-small">(to name proposals, one point of each route, rounded to about 100 m, is sent to the OpenStreetMap Overpass API when this page shows them; each place is looked up once)</span></label>
         <fieldset class="adv-sports"><legend>Sports that count <span class="muted adv-small">none ticked = any sport, mixed adventures allowed</span></legend>
           ${sdk.sports.list().map((s) => `<label class="adv-check"><input type="checkbox" name="sport" value="${esc(s.key)}"${want.has(s.key) ? " checked" : ""}> ${esc(s.icon)} ${esc(s.label)}</label>`).join("")}</fieldset>
@@ -464,6 +467,8 @@
         }
       } catch (e) { sdk.toast(e.message); }
     });
+    // "Find place" only when the osm_places service is loaded and place names are switched on
+    send("/settings").then((c) => { if (!ctx.isStale() && !(c.osm_available && c.osm_names)) $("#adv-place").hidden = true; }).catch(() => {});
     draw();
     await drawPicker();
   }

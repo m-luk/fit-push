@@ -8,9 +8,6 @@ from __future__ import annotations
 import itertools
 import json
 import math
-import os
-import urllib.parse
-import urllib.request
 from datetime import UTC, date, datetime
 from typing import Annotated, Literal
 
@@ -112,15 +109,9 @@ def stats(rows: list[dict]) -> dict:
     }
 
 
-# ---- OpenStreetMap place lookup (only on an explicit user click) ----------------------------
-OVERPASS_URL = "https://overpass-api.de/api/interpreter"  # FITPUSH_OVERPASS_URL overrides it
-PARK = "[boundary=national_park]"
-PARK2 = '[boundary=protected_area][protect_class="2"]'  # IUCN category II = national park
-RANGE = "[natural=mountain_range]"
-
-
+# ---- place names (through the osm_places service module) ----------------------------------
 def route_middle(lines: list[list]) -> list[float] | None:
-    """The point halfway along the joined lines, rounded to 3 decimals (~100 m)."""
+    """The point halfway along the joined lines (osm_places rounds it before sending)."""
     pts = [p for line in lines for p in line]
     if not pts:
         return None
@@ -131,60 +122,7 @@ def route_middle(lines: list[list]) -> list[float] | None:
         if run >= half:
             pts = pts[i + 1 :]
             break
-    return [round(pts[0][0], 3), round(pts[0][1], 3)]
-
-
-def overpass_place(point: list[float]) -> dict:
-    """From the Overpass API: the national park and the mountain range containing the point
-    (else the nearest within 25 / 60 km) and the nearest city or town (within 30 km, else a
-    village). Each is ``{name, inside, distance_m}`` or None; the place also has ``kind``."""
-    lat, lon = point
-    park_near, range_near = f"(around:25000,{lat},{lon})", f"(around:60000,{lat},{lon})"
-    query = (
-        f"[out:json][timeout:25];is_in({lat},{lon})->.a;"
-        f"(area.a{PARK};area.a{PARK2};area.a{RANGE};);out tags;"
-        f"(relation{park_near}{PARK};way{park_near}{PARK};relation{park_near}{PARK2};"
-        f"nwr{range_near}{RANGE}[name];);out tags center;"
-        f'node(around:30000,{lat},{lon})[place~"^(city|town|village)$"][name];out tags;'
-    )
-    req = urllib.request.Request(
-        os.environ.get("FITPUSH_OVERPASS_URL") or OVERPASS_URL,
-        data=urllib.parse.urlencode({"data": query}).encode(),
-        headers={"User-Agent": "fit-push"},
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            elements = json.loads(resp.read().decode("utf-8")).get("elements", [])
-    except (OSError, ValueError) as exc:
-        raise Invalid(f"OpenStreetMap lookup failed: {exc}") from exc
-
-    def name(e: dict) -> str:
-        tags = e.get("tags") or {}
-        return tags.get("name:en") or tags.get("name") or ""
-
-    def where(e: dict) -> list[float] | None:
-        c = e.get("center") or e
-        return [c["lat"], c["lon"]] if "lat" in c and "lon" in c else None
-
-    def best(kind) -> dict | None:
-        """A matching area containing the point, else the nearest match with a position."""
-        found = [e for e in elements if name(e) and kind(e.get("tags") or {})]
-        inside = [e for e in found if e.get("type") == "area"]
-        if inside:
-            return {"name": name(inside[0]), "inside": True, "distance_m": 0.0}
-        near = [
-            {"name": name(e), "inside": False, "distance_m": haversine(point, p), "kind": e["tags"].get("place")}
-            for e in found
-            if (p := where(e))
-        ]
-        return min(near, key=lambda x: x["distance_m"], default=None)
-
-    return {
-        "point": point,
-        "park": best(lambda t: t.get("boundary") == "national_park" or t.get("protect_class") == "2"),
-        "range": best(lambda t: t.get("natural") == "mountain_range"),
-        "city": best(lambda t: t.get("place") in ("city", "town")) or best(lambda t: t.get("place") == "village"),
-    }
+    return [pts[0][0], pts[0][1]]
 
 
 def register(ctx: ModuleContext) -> None:
@@ -202,7 +140,7 @@ def register(ctx: ModuleContext) -> None:
     """)
     adv_t, mem_t = ctx.db.table("adventures"), ctx.db.table("members")
     set_t, dis_t, pl_t = ctx.db.table("settings"), ctx.db.table("dismissed"), ctx.db.table("places")
-    look_t = ctx.db.table("lookups")  # OpenStreetMap answers by activity-id set, so each is asked once
+    look_t = ctx.db.table("lookups")  # place answers + names by activity-id set, so each is built once
 
     ends_cache: dict[int, tuple[list[float], list[float]] | None] = {}  # id -> (start, end); points never change
     tracks: dict[int, list] = {}
@@ -407,7 +345,8 @@ def register(ctx: ModuleContext) -> None:
     # ---- settings and suggestions --------------------------------------------------------
     @ctx.router.get("/settings")
     def get_settings() -> dict:
-        return {**settings(), "defaults": DEFAULTS}
+        osm_available = ctx.service("osm_places", "place") is not None
+        return {**settings(), "defaults": DEFAULTS, "osm_available": osm_available}
 
     @ctx.router.put("/settings")
     def put_settings(body: SettingsIn) -> dict:
@@ -556,7 +495,10 @@ def register(ctx: ModuleContext) -> None:
         point = route_middle([track(r["id"]) for r in rows if r["has_gps"]])
         if point is None:
             raise Invalid("none of these activities has GPS")
-        place = overpass_place(point)
+        osm = ctx.service("osm_places", "place")  # version checked against module.json "uses"
+        if osm is None:
+            raise Invalid("place names need the OpenStreetMap places module (osm_places 1.x)")
+        place = dict(osm(point[0], point[1], refresh=refresh))
         names = [p["name"] for p in (place["park"] or place["range"], place["city"]) if p]  # park beats range
         first = next((r["start_time"] for r in rows if r["start_time"]), None)
         place["name"] = f"{first[:7]} {', '.join(names)}" if names and first else (", ".join(names) or None)

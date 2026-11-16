@@ -227,7 +227,7 @@ RANGE_NEARER = {
 def test_place_lookup_names_the_trip(make_client, monkeypatch):
     fake = FakeOverpass([PARK_INSIDE, CITY, VILLAGE])
     monkeypatch.setenv("FITPUSH_OVERPASS_URL", fake.url)
-    client = make_client(modules="adventures")
+    client = make_client(modules="adventures,osm_places")
     ids = traverse(client)
     place = client.post(f"{API}/place", json={"activity_ids": ids}).json()
     assert place["name"] == "2026-11 Kampinos National Park, Warszawa"  # a city beats a closer village
@@ -243,7 +243,7 @@ def test_place_lookup_names_the_trip(make_client, monkeypatch):
 def test_place_lookup_nearest_park_and_switch_off(make_client, monkeypatch):
     fake = FakeOverpass([PARK_NEAR, VILLAGE])
     monkeypatch.setenv("FITPUSH_OVERPASS_URL", fake.url)
-    client = make_client(modules="adventures")
+    client = make_client(modules="adventures,osm_places")
     ids = traverse(client)
     place = client.post(f"{API}/place", json={"activity_ids": ids}).json()
     assert place["park"]["name"] == "Far Park" and not place["park"]["inside"] and place["park"]["distance_m"] > 1000
@@ -255,7 +255,7 @@ def test_place_lookup_nearest_park_and_switch_off(make_client, monkeypatch):
 
 def test_place_lookup_errors(make_client, monkeypatch):
     monkeypatch.setenv("FITPUSH_OVERPASS_URL", "http://127.0.0.1:9/nothing-listens-here")
-    client = make_client(modules="adventures")
+    client = make_client(modules="adventures,osm_places")
     ids = traverse(client, days=(0, 1))
     r = client.post(f"{API}/place", json={"activity_ids": ids})
     assert r.status_code == 422 and "OpenStreetMap" in r.json()["detail"]
@@ -274,7 +274,7 @@ def test_suggestion_details_and_preview_tracks(make_client):
 def test_place_lookup_mountain_range(make_client, monkeypatch):
     fake = FakeOverpass([RANGE_NEAR, RANGE_NEARER, CITY])
     monkeypatch.setenv("FITPUSH_OVERPASS_URL", fake.url)
-    client = make_client(modules="adventures")
+    client = make_client(modules="adventures,osm_places")
     ids = traverse(client)
     place = client.post(f"{API}/place", json={"activity_ids": ids}).json()
     assert place["range"]["name"] == "Near Range" and not place["range"]["inside"] and place["park"] is None
@@ -283,7 +283,7 @@ def test_place_lookup_mountain_range(make_client, monkeypatch):
     fake2 = FakeOverpass([RANGE_INSIDE, PARK_INSIDE, CITY])
     monkeypatch.setenv("FITPUSH_OVERPASS_URL", fake2.url)
     place = client.post(f"{API}/place", json={"activity_ids": ids, "refresh": True}).json()
-    assert place["range"] == {"name": "Pasmo", "inside": True, "distance_m": 0.0}
+    assert place["range"] == {"name": "Pasmo", "inside": True, "distance_m": 0.0, "kind": None}
     assert place["park"]["name"] == "Kampinos National Park"
     assert place["name"] == "2026-11 Kampinos National Park, Warszawa"  # a park beats the range
     adv = client.post(f"{API}/adventures", json={"name": "x", "activity_ids": ids, "place": place}).json()
@@ -293,7 +293,7 @@ def test_place_lookup_mountain_range(make_client, monkeypatch):
 def test_place_lookups_are_stored(make_client, monkeypatch):
     fake = FakeOverpass([PARK_INSIDE, CITY])
     monkeypatch.setenv("FITPUSH_OVERPASS_URL", fake.url)
-    client = make_client(modules="adventures")
+    client = make_client(modules="adventures,osm_places")
     ids = traverse(client)
     first = client.post(f"{API}/place", json={"activity_ids": ids}).json()
     assert client.post(f"{API}/place", json={"activity_ids": list(reversed(ids))}).json() == first
@@ -334,3 +334,13 @@ def test_traverse_needs_a_continuous_line_that_goes_somewhere(make_client):
     client.put(f"{API}/settings", json={"traverse_link_m": 2000})
     got = {tuple(s["activity_ids"]): s["type"] for s in client.get(f"{API}/suggestions").json()}
     assert got[tuple(jump)] == "traverse"  # with a 2 km allowance the jump is bridged
+
+
+def test_place_names_need_the_osm_places_module(make_client):
+    client = make_client(modules="adventures")  # osm_places not loaded
+    ids = traverse(client, days=(0, 1))
+    assert client.get(f"{API}/settings").json()["osm_available"] is False
+    r = client.post(f"{API}/place", json={"activity_ids": ids})
+    assert r.status_code == 422 and "osm_places" in r.json()["detail"]
+    both = make_client(modules="adventures,osm_places")
+    assert both.get(f"{API}/settings").json()["osm_available"] is True

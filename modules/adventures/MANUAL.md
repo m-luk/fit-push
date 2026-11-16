@@ -78,7 +78,8 @@ left out unless you change that.
   proposal shown on the Adventures page (each place is looked up once and remembered),
   and when you click **Find place**. If you click **Create** before the place is found,
   the name comes from the type and dates. Turn off **Use OpenStreetMap for place
-  names** in the detection settings to never send anything. The lookup needs an internet
+  names** in the detection settings to never send anything. Place names need the
+  **OpenStreetMap places** module (loaded by default); without it the option is greyed out. The lookup needs an internet
   connection and can take a few seconds; national parks are found when the route's
   middle is inside one or within 25 km of its centre, mountain ranges when it is inside
   one or within 60 km of where OpenStreetMap places the range (often a label point or a

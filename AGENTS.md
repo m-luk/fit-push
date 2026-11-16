@@ -21,11 +21,15 @@ lap detection, segments, tags. Optional features come as **modules**.
 |---|---|
 | Data model, import/parse/analysis pipeline, something every page relies on (activities, sports, tags, laps, segments, settings, storage) | **core** (`app/`) |
 | An optional capability with its own page, activity card or API; useful to some users | **module** (`modules/<id>/`), see the **module-development** skill and `modules/RULES.md` |
+| A capability several modules need, or any talk to an external service (no UI of its own) | a **service module** (`--provides service`) offering versioned services; consumers declare them in `uses` (`docs/SDK.md`, "Module kinds", "Service API workflow") |
 | A module needs something the SDK lacks | a separate **core** change extending `app/sdk.py` / `window.fitpush`, documented in `docs/SDK.md` |
 
 Modules must stay small (one capability), self-contained, owned (GitHub id) and
 documented (`README.md` intent + `MANUAL.md`). Working on a module never requires
-reading `app/`; that keeps the context small and the core safe.
+reading `app/`; that keeps the context small and the core safe. Modules use each other
+only through versioned services declared on both sides (`services` / `uses`), which
+`scripts/modules.py check` cross-checks; change a service only by the workflow in
+`docs/SDK.md`.
 
 ## Commands
 

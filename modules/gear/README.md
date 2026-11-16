@@ -39,21 +39,30 @@ Events: `activity.imported` assigns defaults; `activity.updated` with a sport ch
 re-assigns defaults unless the gear was chosen manually; `activity.deleted` removes the
 activity's rows. Changing defaults never rewrites past activities.
 
-Services for other modules (`ctx.service("gear", name)`, used by importers):
-
-- `ensure(name, kind="other", notes="") -> id`: the item with that name (case-insensitive),
-  created when missing.
-- `assign(activity_id, gear_id)`: use the item on the activity, replacing its gear of the
-  same kind; counts as a manual choice.
-- `add_defaults(gear_id, sports) -> [targets]`: make the item the default for these sport
-  keys where its kind has no default yet (existing defaults are never taken over).
-
 Frontend: the **Gear** page (`#/m/gear`) lists items with totals and a limit bar, with
 forms to add/edit them and pick their defaults, and a **No gear** view (`?view=nogear`,
 `&sport=`) listing activities without gear with checkboxes to add an item to many at
 once. On activity pages a compact **Gear** line under the title and tags (an activity
 card with `placement: "header"`, SDK 1.2) shows the activity's gear as chips with
 **Change** / **Reset**; it is hidden while no gear exists.
+
+## Services
+
+Versioned services for other modules (declared in `module.json` `services`; consumers
+declare them in `uses`, e.g. `{"gear": {"ensure": 1}}`). All three are `1.0`. Call them
+from your routes or event handlers; errors propagate to the caller.
+
+- `ensure(name, kind="other", notes="") -> id`: the item with that name (case-insensitive),
+  created when missing. Raises `Invalid` for an empty name or an unknown kind; names are
+  cut to 100 characters.
+- `assign(activity_id, gear_id) -> None`: use the item on the activity, replacing its gear
+  of the same kind; counts as a manual choice. Raises `NotFound` for an unknown activity
+  or item.
+- `add_defaults(gear_id, sports) -> [targets]`: make the item the default for these sport
+  keys where its kind has no default yet (existing defaults are never taken over).
+  Returns the targets added (`"sport:<key>"`); unknown sport keys are skipped.
+
+Used by: **strava_import** (gear from a Strava export).
 
 ## Data
 

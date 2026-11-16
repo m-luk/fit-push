@@ -7,7 +7,10 @@ A module exposes ``register(ctx: ModuleContext) -> None``. Through ``ctx`` it ge
 - ``ctx.db``: SQLite access restricted to the module's own tables (``ctx.db.table("x")``
   gives the prefixed name ``m_<id>_x``);
 - ``ctx.on(event, handler)``: react to core events (see ``app.events.EVENTS``);
-- ``ctx.log``: a logger named after the module.
+- ``ctx.log``: a logger named after the module;
+- ``ctx.provide`` / ``ctx.service``: versioned services between modules (a *service
+  module* offers them, declared in ``module.json`` ``services``; consumers declare the
+  major version they were written for in ``uses``).
 
 Everything here is a stable contract (``SDK_VERSION``). Breaking changes bump the
 major version; modules declare the major they target in ``module.json`` (``"sdk": "1"``).
@@ -28,7 +31,7 @@ from fastapi import APIRouter
 from .analytics import _prepare, analyse, window_columns
 from .core import Core, Invalid, NotFound
 
-SDK_VERSION = "1.2"
+SDK_VERSION = "1.3"
 
 __all__ = ["SDK_VERSION", "CoreAPI", "Invalid", "ModuleContext", "ModuleDB", "NotFound"]
 
@@ -163,6 +166,7 @@ class ModuleContext:
     router: APIRouter
     _on: Callable[[str, Callable], None]
     _services: dict[str, dict[str, Callable]] = field(default_factory=dict)
+    _versions: dict[str, dict[str, str]] = field(default_factory=dict)
     log: logging.Logger = field(init=False)
 
     def __post_init__(self) -> None:
@@ -173,12 +177,34 @@ class ModuleContext:
         self._on(event, handler)
 
     def provide(self, name: str, fn: Callable) -> None:
-        """Offer ``fn`` to other modules as service ``<this module id>.<name>``."""
+        """Offer ``fn`` to other modules as service ``<this module id>.<name>``.
+
+        Declare it with its version in ``module.json`` ``services`` (``{"name": "1.0"}``);
+        an undeclared service still works but is logged and fails ``modules.py check``."""
+        declared = self.manifest.get("services") or {}
+        if name not in declared:
+            self.log.warning("service %r is not declared in module.json 'services'", name)
         self._services.setdefault(self.id, {})[name] = fn
+        self._versions.setdefault(self.id, {})[name] = str(declared.get(name, "0.0"))
 
-    def service(self, module_id: str, name: str) -> Callable | None:
-        """A service another module provides, or None when that module is not loaded.
+    def service(self, module_id: str, name: str, major: int | None = None) -> Callable | None:
+        """A service another module provides, or None when that module is not loaded or
+        offers a different major version than this module expects.
 
-        Look it up when you need it (not in ``register``): load order is not guaranteed
-        unless the module is listed in ``depends``."""
-        return self._services.get(module_id, {}).get(name)
+        The expected major comes from ``major`` or from this module's ``uses`` in
+        ``module.json``; without either, any version is returned. Look services up when
+        you need them (not in ``register``): load order is only guaranteed for ``depends``."""
+        fn = self._services.get(module_id, {}).get(name)
+        want = major if major is not None else ((self.manifest.get("uses") or {}).get(module_id) or {}).get(name)
+        if fn is None or want is None:
+            return fn
+        have = self.service_version(module_id, name) or "0.0"
+        if int(have.split(".")[0]) != int(want):
+            self.log.warning("%s.%s is version %s; this module needs major %s", module_id, name, have, want)
+            return None
+        return fn
+
+    def service_version(self, module_id: str, name: str) -> str | None:
+        """``"MAJOR.MINOR"`` of a loaded service (``"0.0"`` when its provider did not
+        declare it), or None when it is not available."""
+        return self._versions.get(module_id, {}).get(name)

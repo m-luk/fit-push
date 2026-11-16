@@ -61,16 +61,14 @@ Endpoints (under `/api/m/adventures`):
   `POST /adventures/{id}/place` does the same for an adventure and stores the result;
   `POST /adventures` accepts that result as `place`.
 
-**OpenStreetMap lookup** (rule 13 exception): only when the `osm_names` setting is on
-(default). The page looks up each shown proposal in the background, one request at a
-time, so **Create** never waits; **Find place** asks again. Answers are stored in
-`m_adventures_lookups` by activity-id set, so a proposal is looked up once. It sends
-one point, the middle of the route rounded to 3 decimals (~100 m), to the Overpass API
-(`FITPUSH_OVERPASS_URL` overrides the endpoint; tests use a local fake). The query
-asks for national parks (`boundary=national_park` or `boundary=protected_area` with
-`protect_class=2`) containing the point, else the nearest one within 25 km, mountain ranges
-(`natural=mountain_range`) containing the point, else the nearest within 60 km, and the
-nearest `place=city|town` within 30 km (a village when there is none). One request.
+**Place names** come from the **osm_places** service module (service `place` 1.x,
+declared in `uses`; a soft dependency: without it, place names are off and
+`GET /settings` says `osm_available: false`). Adventures picks the point, the middle of
+the route, and builds the name. osm_places rounds the point, sends it, caches the answer
+and paces the requests. Lookups run only when the `osm_names` setting is on (default):
+the page looks up each shown proposal in the background, one at a time, so **Create**
+never waits, and **Find place** asks again. Answers and names are stored in
+`m_adventures_lookups` by activity-id set, so a proposal is looked up once.
 - `GET /activity/{id}`: adventures containing one activity (for the header line).
 
 Events: `activity.deleted` removes the activity from adventures (an adventure left empty
