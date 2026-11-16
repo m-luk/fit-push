@@ -30,7 +30,8 @@ reading `app/`; that keeps the context small and the core safe.
 ## Commands
 
 ```bash
-python scripts/run.py                    # venv + deps, then serve http://127.0.0.1:8000 (core + modules)
+python scripts/run.py                    # venv + deps, then the app in its own window (like the desktop app)
+python scripts/run.py --no-desktop       # server only, http://127.0.0.1:8000, no window (use this for checks)
 python scripts/run.py --core-only        # core only (any `python -m app` option passes through)
 python scripts/run.py --tests            # pytest: core (twice: core-only + all modules) + module tests
 python scripts/devapp.py install         # "fit-push (dev)" Start/app-menu launcher: this repo, --reload --desktop

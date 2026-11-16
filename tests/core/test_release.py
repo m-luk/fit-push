@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import socket
 import sys
 from pathlib import Path
@@ -27,7 +28,7 @@ def _release():
 def test_version_endpoint(client):
     r = client.get("/api/version")
     assert r.status_code == 200
-    assert r.json() == {"app": "fit-push", "version": __version__}
+    assert r.json() == {"app": "fit-push", "version": __version__, "instance": str(ROOT)}
 
 
 def test_versions_agree():
@@ -82,13 +83,113 @@ def test_cli_parses_desktop_options():
 
 def test_desktop_mode_from_source_reuses_running_instance(monkeypatch, tmp_path):
     opened: list[tuple[str, bool]] = []
-    monkeypatch.setattr(launcher, "running_instance", lambda host, port, timeout=1.0: __version__)
+    monkeypatch.setattr(
+        launcher, "running_instance", lambda host, port, timeout=1.0, same_installation=False: __version__
+    )
     monkeypatch.setattr(launcher, "open_url", lambda url, app_window: opened.append((url, app_window)))
     monkeypatch.setenv("FITPUSH_DB", str(tmp_path / "x.db"))
     assert launcher.main(["--desktop", "--reload"]) == 0
     assert launcher.main(["--desktop", "--no-app-window"]) == 0
     assert opened == [("http://127.0.0.1:8000/", True), ("http://127.0.0.1:8000/", False)]
     assert not (tmp_path / "backups").exists()  # returned before backing up / serving
+
+
+class _Response:
+    def __init__(self, body: bytes):
+        self.body = body
+
+    def read(self) -> bytes:
+        return self.body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc) -> None:
+        return None
+
+
+def test_running_instance_of_another_installation_is_not_reused(monkeypatch):
+    from app import paths
+
+    other = b'{"app": "fit-push", "version": "0.1.0", "instance": "C:/Program Files/fit-push/fit-push.exe"}'
+    monkeypatch.setattr(launcher.urllib.request, "urlopen", lambda url, timeout: _Response(other))
+    assert launcher.running_instance("127.0.0.1", 1) == "0.1.0"
+    assert launcher.running_instance("127.0.0.1", 1, same_installation=True) is None
+    ours = json.dumps({"app": "fit-push", "version": "9.9.9", "instance": paths.instance()}).encode()
+    monkeypatch.setattr(launcher.urllib.request, "urlopen", lambda url, timeout: _Response(ours))
+    assert launcher.running_instance("127.0.0.1", 1, same_installation=True) == "9.9.9"
+
+
+def test_desktop_mode_picks_a_free_port_next_to_another_installation(monkeypatch, tmp_path):
+    import types
+
+    served: list[int] = []
+    monkeypatch.setattr(launcher, "running_instance", lambda host, port, timeout=1.0, same_installation=False: None)
+    monkeypatch.setattr(launcher, "port_free", lambda host, port: False)  # 8000 taken by something else
+    monkeypatch.setattr(launcher, "free_port", lambda host: 8123)
+    monkeypatch.setitem(sys.modules, "uvicorn", types.SimpleNamespace(run=lambda app, **kw: served.append(kw["port"])))
+    monkeypatch.setenv("FITPUSH_DB", str(tmp_path / "x.db"))
+    assert launcher.main(["--desktop", "--no-open", "--no-backup"]) == 0
+    assert served == [8123]
+
+
+def test_stopping_the_server_closes_only_its_own_windows(monkeypatch):
+    from app import taskbar
+
+    closed: list[int] = []
+    monkeypatch.setattr(taskbar.sys, "platform", "win32")
+    monkeypatch.setattr(taskbar, "_app_windows", lambda: [5, 6, 7])
+    monkeypatch.setattr(taskbar, "_close_window", closed.append)
+    monkeypatch.setattr(taskbar, "_ours", {6, 7, 99})  # 5: another fit-push's window; 99: already closed
+    assert taskbar.close_app_windows() == 2
+    assert sorted(closed) == [6, 7]
+    assert taskbar.close_app_windows() == 0  # forgotten after closing
+
+
+def test_server_stop_closes_the_app_window(monkeypatch, tmp_path):
+    import types
+
+    from app import taskbar
+
+    calls: list[str] = []
+    monkeypatch.setattr(launcher, "running_instance", lambda host, port, timeout=1.0, same_installation=False: None)
+    monkeypatch.setattr(launcher, "port_free", lambda host, port: True)
+    monkeypatch.setattr(launcher, "_open_when_ready", lambda *a: calls.append("open"))
+    monkeypatch.setattr(taskbar, "close_windows_on_console_close", lambda: calls.append("console handler"))
+    monkeypatch.setattr(taskbar, "close_app_windows", lambda: calls.append("close"))
+    monkeypatch.setitem(sys.modules, "uvicorn", types.SimpleNamespace(run=lambda app, **kw: calls.append("serve")))
+    monkeypatch.setenv("FITPUSH_DB", str(tmp_path / "x.db"))
+    assert launcher.main(["--desktop", "--no-backup"]) == 0
+    assert calls[-2:] == ["serve", "close"] and "console handler" in calls
+    calls.clear()
+    assert launcher.main(["--desktop", "--no-backup", "--no-app-window"]) == 0
+    assert "close" not in calls  # a browser tab is not ours to close
+
+
+def _run_script():
+    spec = importlib.util.spec_from_file_location("run_script", ROOT / "scripts" / "run.py")
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+@pytest.mark.parametrize(
+    ("argv", "flag", "window"),
+    [([], "--desktop", True), (["--no-desktop"], "--no-desktop", False), (["--list-backups"], "--desktop", False)],
+)
+def test_run_script_starts_like_the_desktop_app(monkeypatch, argv, flag, window):
+    run = _run_script()
+    started: list[list[str]] = []
+    prepared: list[bool] = []
+    monkeypatch.setattr(run, "ensure_venv", lambda: Path("py"))
+    monkeypatch.setattr(run, "ensure_requirements", lambda py, dev: None)
+    monkeypatch.setattr(run, "prepare_window", lambda py, argv: prepared.append(True))
+    monkeypatch.setattr(run.subprocess, "call", lambda cmd, cwd: started.append(cmd) or 0)
+    monkeypatch.setattr(run.sys, "argv", ["run.py", *argv])
+    assert run.main() == 0
+    assert started[0][:3] == ["py", "-m", "app"] and flag in started[0]
+    assert bool(prepared) is window
 
 
 def test_open_url_uses_app_window_or_falls_back_to_a_tab(monkeypatch):
@@ -125,6 +226,22 @@ def test_window_watcher_stops_after_the_last_window_closes(monkeypatch):
     taskbar._watch_loop(ident, lambda: closed.append(True), grace=4.0, appear=60.0)
     assert closed == [True]
     assert tagged == [7, 8, 9]  # every new window once
+
+
+def test_window_watcher_ignores_other_servers_windows(monkeypatch):
+    # Regression: another fit-push's window (5, open before ours) kept the server running after
+    # its own window (7) closed, and would have been closed with it.
+    taskbar = _fake_clock(monkeypatch)
+    frames = iter([[5], [5, 7], [5, 7], [5]] + [[5]] * 100)
+    monkeypatch.setattr(taskbar, "_app_windows", lambda: next(frames))
+    tagged: list[int] = []
+    monkeypatch.setattr(taskbar, "_set_identity", lambda hwnd, ident: tagged.append(hwnd))
+    monkeypatch.setattr(taskbar, "_ours", set())
+    closed: list[bool] = []
+    ident = taskbar.Identity("fit-push.dev", "cmd", "fit-push (dev)", None)
+    taskbar._watch_loop(ident, lambda: closed.append(True), grace=4.0, appear=60.0, ignore=frozenset({5}))
+    assert closed == [True]
+    assert tagged == [7] and taskbar._ours == {7}
 
 
 def test_window_watcher_does_nothing_when_no_window_appears(monkeypatch):
@@ -167,7 +284,7 @@ def test_devapp_install_and_uninstall_linux_entry(monkeypatch, tmp_path):
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
     monkeypatch.setattr(dev, "ensure_venv", lambda: Path("/venv/bin/python"))
     monkeypatch.setattr(dev, "ensure_requirements", lambda py, dev: None)
-    monkeypatch.setattr(dev, "make_icon", lambda py: None)
+    monkeypatch.setattr(dev, "make_icon", lambda py, install=False: None)
     assert dev.main(["install", "--core-only"]) == 0
     entry = tmp_path / "applications" / "fit-push-dev.desktop"
     text = entry.read_text(encoding="utf-8")

@@ -23,6 +23,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 TITLE = "fit-push"  # <title> of index.html: how the app window is found
 BROWSER_EXES = ("msedge.exe", "chrome.exe", "brave.exe", "chromium.exe", "vivaldi.exe")
+_ours: set[int] = set()  # app windows this process tagged (opened for its own server)
 
 
 @dataclass(frozen=True)
@@ -48,7 +49,21 @@ def identity() -> Identity | None:
     return Identity("fit-push.dev", command, "fit-push (dev)", f"{icon},0" if icon.is_file() else None)
 
 
-def tag_app_windows(timeout: float = 20.0) -> None:
+def app_windows() -> frozenset[int]:
+    """The fit-push app windows open right now (any installation's). Never raises.
+
+    Take this before opening a window and pass it as ``ignore`` below: those windows belong
+    to other fit-push servers (another checkout, the installed app) and must not be tagged,
+    counted or closed as ours. (All app windows share one title, so a window another server
+    opens *after* ours still looks like ours; the common case, an instance already open, is safe.)
+    """
+    try:
+        return frozenset(_app_windows())
+    except Exception:  # pragma: no cover
+        return frozenset()
+
+
+def tag_app_windows(timeout: float = 20.0, ignore: frozenset[int] = frozenset()) -> None:
     """Give fit-push app windows that appear within `timeout` s their taskbar identity (Windows only).
 
     For a launcher that only opens a window for an already running server and exits: the
@@ -56,54 +71,67 @@ def tag_app_windows(timeout: float = 20.0) -> None:
     """
     if sys.platform != "win32" or not (ident := identity()):
         return
-    threading.Thread(target=_tag_loop, args=(ident, timeout), name="fitpush-taskbar").start()
+    threading.Thread(target=_tag_loop, args=(ident, timeout, ignore), name="fitpush-taskbar").start()
 
 
-def _tag_loop(ident: Identity, timeout: float) -> None:
+def _tag_loop(ident: Identity, timeout: float, ignore: frozenset[int] = frozenset()) -> None:
     try:
         end = time.monotonic() + timeout
         while time.monotonic() < end:
-            windows = _app_windows()
+            windows = [h for h in _app_windows() if h not in ignore]
             if windows:
                 for hwnd in windows:
                     _set_identity(hwnd, ident)
+                    _ours.add(hwnd)
                 return
             time.sleep(0.25)
     except Exception:  # pragma: no cover - cosmetic; must never break the launcher
         pass
 
 
-def watch_app_windows(on_all_closed: Callable[[], None], grace: float = 4.0, appear: float = 60.0) -> bool:
+def watch_app_windows(
+    on_all_closed: Callable[[], None],
+    grace: float = 4.0,
+    appear: float = 60.0,
+    ignore: frozenset[int] = frozenset(),
+) -> bool:
     """Tag fit-push app windows as they appear and call `on_all_closed` once the last one is gone.
 
     The server process runs this. "Gone" means no app window for `grace` seconds, so a page
     reload (the title is briefly the URL) or a dev auto-reload doesn't count. If no window
-    shows up within `appear` seconds nothing is stopped. Windows only; returns whether it
-    started.
+    shows up within `appear` seconds nothing is stopped. Windows in `ignore` (open before ours,
+    see `app_windows`) are another server's. Windows only; returns whether it started.
     """
     if sys.platform != "win32":
         return False
     ident = identity()
     threading.Thread(
-        target=_watch_loop, args=(ident, on_all_closed, grace, appear), name="fitpush-windows", daemon=True
+        target=_watch_loop, args=(ident, on_all_closed, grace, appear, ignore), name="fitpush-windows", daemon=True
     ).start()
     return True
 
 
-def _watch_loop(ident: Identity | None, on_all_closed: Callable[[], None], grace: float, appear: float) -> None:
+def _watch_loop(
+    ident: Identity | None,
+    on_all_closed: Callable[[], None],
+    grace: float,
+    appear: float,
+    ignore: frozenset[int] = frozenset(),
+) -> None:
     tagged: set[int] = set()
     started = last_seen = time.monotonic()
     seen = False
     try:
         while True:
             now = time.monotonic()
-            windows = _app_windows()
+            windows = [h for h in _app_windows() if h not in ignore]
             if windows:
                 seen, last_seen = True, now
                 for hwnd in set(windows) - tagged:
                     if ident:
                         _set_identity(hwnd, ident)
                     tagged.add(hwnd)
+                    _ours.add(hwnd)
             elif seen and now - last_seen >= grace:
                 on_all_closed()
                 return
@@ -112,6 +140,32 @@ def _watch_loop(ident: Identity | None, on_all_closed: Callable[[], None], grace
             time.sleep(0.5)
     except Exception:  # pragma: no cover - must never break the server
         return
+
+
+def close_app_windows() -> int:
+    """Close the app windows this process opened, when its server stops. Returns how many. Never raises."""
+    if sys.platform != "win32":
+        return 0
+    try:
+        open_now = set(_app_windows())
+        closing = _ours & open_now
+        for hwnd in closing:
+            _close_window(hwnd)
+        _ours.clear()
+        return len(closing)
+    except Exception:  # pragma: no cover - must never break shutdown
+        return 0
+
+
+def close_windows_on_console_close() -> bool:
+    """Close our app windows when the server's console window is closed (Windows only).
+
+    Closing a console ends its processes without a Ctrl+C, so no ``finally`` runs; a console
+    control handler gets a few seconds to close the windows first.
+    """
+    if sys.platform != "win32":
+        return False
+    return bool(_kernel32.SetConsoleCtrlHandler(_CONSOLE_HANDLER, True))
 
 
 def stop_server() -> None:
@@ -197,6 +251,21 @@ if sys.platform == "win32":
     ]
     _kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
     _kernel32.GenerateConsoleCtrlEvent.argtypes = [wintypes.DWORD, wintypes.DWORD]
+    _user32.PostMessageW.argtypes = [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]
+    _HandlerRoutine = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.DWORD)
+    _kernel32.SetConsoleCtrlHandler.argtypes = [_HandlerRoutine, wintypes.BOOL]
+    _WM_CLOSE = 0x0010
+    _CTRL_CLOSE_EVENTS = (2, 5, 6)  # console closed, log off, shut down
+
+    def _close_window(hwnd: int) -> None:
+        _user32.PostMessageW(hwnd, _WM_CLOSE, 0, 0)  # like the window's close button
+
+    def _on_console_event(event: int) -> bool:
+        if event in _CTRL_CLOSE_EVENTS:
+            close_app_windows()
+        return False  # let the default handling (end the process) go on
+
+    _CONSOLE_HANDLER = _HandlerRoutine(_on_console_event)  # module-level: must not be garbage collected
 
     def _process_name(hwnd: int) -> str:
         pid = wintypes.DWORD()
@@ -255,3 +324,6 @@ else:
 
     def _set_identity(hwnd: int, ident: Identity) -> bool:
         return False
+
+    def _close_window(hwnd: int) -> None:
+        pass
