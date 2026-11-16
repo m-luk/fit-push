@@ -16,6 +16,7 @@
 .adv-table tr[aria-selected="true"] { background: var(--sel-fill); }
 .adv-table tr[data-day]:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .adv-row-actions { text-align: right; }
+.adv-grid:not(:empty) { margin-bottom: 16px; }
 .adv-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
 .adv-card { display: flex; flex-direction: column; gap: 6px; color: var(--text-primary); text-decoration: none; }
 .adv-card:hover { background: var(--surface-2); }

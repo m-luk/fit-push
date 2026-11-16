@@ -50,8 +50,8 @@
         <div class="adv-actions"><button type="button" class="btn" id="adv-settings-btn" aria-expanded="false">Detection settings</button>
           <button type="button" class="btn primary" id="adv-new">New adventure</button></div></div>
       <div id="adv-settings" hidden></div>
-      <div id="adv-sugg"></div>
-      <div class="adv-grid" id="adv-list"></div>`;
+      <div class="adv-grid" id="adv-list"></div>
+      <div id="adv-sugg"></div>`;
     const $ = (s) => el.querySelector(s);
     let sugg = [], advs = [], cfg = null;
     const open = new Set(), places = new Map(); // expanded proposal keys, looked-up places
