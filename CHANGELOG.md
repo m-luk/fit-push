@@ -23,7 +23,9 @@ How to update it: see "Changelog" in `AGENTS.md`.
   multi-day. Tiles show the highest point, the longest day and the biggest climb, and the
   map can also be coloured by elevation, speed or heart rate. **⚙ Customize** picks and
   orders the tiles like on an activity, as the default for traverses or multi-day trips
-  or just for one adventure.
+  or just for one adventure. Multi-day trips are found across a whole area (default 20 km,
+  for example hikes from neighbouring valleys), and everyday training near home (a spot
+  used in 15+ weeks) is left out.
 - Module developers: **service modules** (`--provides service`) and versioned services
   (SDK 1.3). Providers declare `services` with versions and document them in a README
   `## Services` section; consumers declare `uses` with the major version they need and

@@ -18,16 +18,22 @@ Two adventure types:
   starts within `traverse_link_m` (default 1 km) of where the previous one ended, and at
   least half of the activities are point-to-point (they end more than `base_radius_m`
   from their start). A loop from camp in between is fine; a bus ride is not.
-- **Multi-day**: every other group: outings from one base, hut to hut with gaps, a trip
-  with loops from a few places.
+- **Multi-day**: every other group: outings from one base, hikes from trailheads in
+  neighbouring valleys, hut to hut with gaps, a trip with loops from a few places.
 
 **Autodetect** walks the candidate activities in time order (GPS and a start time, the
 allowed sports, none of the excluded tags, not yet in an adventure). An activity joins
 the current group when at most `max_gap_days` calendar days without activity lie between
 it and the group's last day, and it starts within `traverse_link_m` of the previous end
-or within `base_radius_m` (default 2 km) of any start or end of the group. Starts at a
-**home** location (a place with starts in at least `home_weeks` different weeks) never
-link, so everyday training from home is not proposed. A group with at least `min_days`
+or within `area_radius_m` (default 20 km) of any start or end of the trip so far: the
+*same area*, so trailheads in neighbouring valleys belong together (tuned on a real
+Tatra week with starts 7-17 km apart). **Home** spots are clusters of starts
+(`base_radius_m`, 2 km) used in at least `home_weeks` (default 15) different weeks. An
+activity that starts and ends within `home_radius_m` (default 10 km) of a home spot is
+everyday training: it is skipped and ends the current trip. One that starts near home but
+ends away can begin a trip (leaving home on a traverse) but never joins one. A
+mountain trailhead visited in a few weeks a year stays below `home_weeks`, so trips there
+are found. A group with at least `min_days`
 days becomes a proposal, typed by the rule above (`max_gap_m` is its largest gap between
 the end of one track and the start of the next). Dismissed proposals are remembered and
 not shown again.
@@ -40,7 +46,8 @@ measure like the activity map.
 Endpoints (under `/api/m/adventures`):
 
 - `GET /settings`, `PUT /settings`: detection settings `{sports, exclude_tags,
-  max_gap_days, traverse_link_m, base_radius_m, min_days, home_weeks, osm_names}`; `sports` empty =
+  max_gap_days, traverse_link_m, area_radius_m, base_radius_m, min_days, home_weeks,
+  home_radius_m}`; `sports` empty =
   any sport (mixed adventures allowed); `exclude_tags` defaults to `["commute"]`.
 - `GET /suggestions`: proposals `{key, type, name, activity_ids, first_day, last_day,
   days, max_gap_m, distance_m, activities}`; `POST /suggestions/dismiss` `{key}`; `POST /suggestions/reset`

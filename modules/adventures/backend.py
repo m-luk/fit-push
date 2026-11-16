@@ -38,9 +38,11 @@ DEFAULTS: dict = {
     "exclude_tags": ["commute"],
     "max_gap_days": 1,  # calendar days without activity allowed between two days of one adventure
     "traverse_link_m": 1_000.0,  # traverse: each start within this distance of the previous end
-    "base_radius_m": 2_000.0,  # grouping: a start within this distance of a start or end of the group
+    "area_radius_m": 20_000.0,  # grouping: a start within this distance of a start or end of the trip so far
+    "base_radius_m": 2_000.0,  # one spot: a loop ends this close to its start; home spots have this size
     "min_days": 2,
-    "home_weeks": 8,  # a place with starts in this many different weeks is "home"; 0 = off
+    "home_weeks": 15,  # a spot with starts in this many different weeks is "home"; 0 = off
+    "home_radius_m": 10_000.0,  # activities starting and ending this close to home are everyday training
 }
 
 
@@ -49,9 +51,11 @@ class SettingsIn(BaseModel):
     exclude_tags: list[str] = Field(default_factory=list, max_length=100)
     max_gap_days: int = Field(default=1, ge=0, le=30)
     traverse_link_m: float = Field(default=1_000.0, ge=50, le=50_000)
+    area_radius_m: float = Field(default=20_000.0, ge=100, le=200_000)
     base_radius_m: float = Field(default=2_000.0, gt=0, le=100_000)
     min_days: int = Field(default=2, ge=1, le=60)
-    home_weeks: int = Field(default=8, ge=0, le=1000)
+    home_weeks: int = Field(default=15, ge=0, le=1000)
+    home_radius_m: float = Field(default=10_000.0, ge=0, le=100_000)
 
 
 class AdventureIn(BaseModel):
@@ -146,6 +150,14 @@ def register(ctx: ModuleContext) -> None:
     """)
     adv_t, mem_t = ctx.db.table("adventures"), ctx.db.table("members")
     set_t, dis_t, tiles_t = ctx.db.table("settings"), ctx.db.table("dismissed"), ctx.db.table("tiles")
+    # Settings saved before the area rule (version 2) kept the old defaults; drop those so
+    # the new defaults apply, but keep what the user chose differently.
+    if not ctx.db.query(f"SELECT 1 FROM {set_t} WHERE key = 'settings_version'"):
+        for key, old in (("home_weeks", "8"), ("traverse_max_m", None)):
+            for r in ctx.db.query(f"SELECT value FROM {set_t} WHERE key = ?", (key,)):
+                if old is None or r["value"] == old:
+                    ctx.db.execute(f"DELETE FROM {set_t} WHERE key = ?", (key,))
+        ctx.db.execute(f"INSERT INTO {set_t} (key, value) VALUES ('settings_version', '2')")
 
     ends_cache: dict[int, tuple[list[float], list[float]] | None] = {}  # id -> (start, end); points never change
     tracks: dict[int, list] = {}
@@ -303,7 +315,7 @@ def register(ctx: ModuleContext) -> None:
         homes = [c[0] for c in clusters if cfg["home_weeks"] and len(c[1]) >= cfg["home_weeks"]]
 
         def at_home(p: list[float]) -> bool:
-            return any(haversine(h, p) <= radius for h in homes)
+            return any(haversine(h, p) <= cfg["home_radius_m"] for h in homes)
 
         groups: list[dict] = []
         cur: dict | None = None
@@ -312,15 +324,20 @@ def register(ctx: ModuleContext) -> None:
                 continue
             if skip_tags & {t.lower() for t in a["tags"]}:
                 continue
-            # joins: close in time, not at home, and starting at the previous end or near any
-            # start / end of the group (a base, a hut, the last camp)
+            home_start = at_home(start)
+            if home_start and at_home(end):  # everyday training near home ends any trip
+                cur = None
+                continue
+            # joins: close in time, not from home, and starting at the previous end or in the
+            # same area as the trip so far (neighbouring valleys, the next hut, the last camp);
+            # a start near home that ends away can only begin a trip
             joins = (
                 cur is not None
+                and not home_start
                 and (day - cur["last"]).days - 1 <= cfg["max_gap_days"]
-                and not at_home(start)
                 and (
                     haversine(cur["ends"][-1], start) <= cfg["traverse_link_m"]
-                    or any(haversine(p, start) <= radius for p in cur["starts"] + cur["ends"])
+                    or any(haversine(p, start) <= cfg["area_radius_m"] for p in cur["starts"] + cur["ends"])
                 )
             )
             if not joins:

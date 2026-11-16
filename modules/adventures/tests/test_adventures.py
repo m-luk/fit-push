@@ -41,7 +41,7 @@ def test_gap_and_distance_limits(make_client):
     a = act(client, 0)
     b = act(client, 2, north_m=LEG_M)  # one empty day in between: allowed by default
     act(client, 5, north_m=2 * LEG_M)  # two empty days: a new group
-    far = act(client, 3, north_m=LEG_M + 25_000)  # starts 25 km from any end: not linked
+    far = act(client, 3, north_m=LEG_M + 35_000)  # starts ~30 km from the trip: another area
     sugg = client.get(f"{API}/suggestions").json()
     assert [s["activity_ids"] for s in sugg] == [[a, b]]
     assert far not in sugg[0]["activity_ids"]
@@ -57,8 +57,9 @@ def test_settings_filter_sports_and_tags(make_client):
     client.put(f"/api/activities/{ids[1]}/tags", json={"tags": ["Commute"]})
     s = client.get(f"{API}/settings").json()
     assert s["exclude_tags"] == ["commute"] and s["sports"] == [] and s["traverse_link_m"] == 1_000
-    # the commute is skipped, which leaves a 5 km hole in the line: nothing links any more
-    assert client.get(f"{API}/suggestions").json() == []
+    # the commute is skipped: the 5 km hole breaks the line, but it is the same area
+    got = client.get(f"{API}/suggestions").json()[0]
+    assert got["activity_ids"] == [ids[0], ids[2]] and got["type"] == "multiday"
     client.put(f"{API}/settings", json={"exclude_tags": []})
     assert client.get(f"{API}/suggestions").json()[0]["activity_ids"] == ids
     client.put(f"{API}/settings", json={"exclude_tags": [], "sports": ["cycling"]})  # the tracks are runs
@@ -69,7 +70,7 @@ def test_settings_filter_sports_and_tags(make_client):
 
 def test_home_is_not_an_adventure(make_client):
     client = make_client(modules="adventures")
-    for week in range(8):  # daily-ish training from home in 8 different weeks
+    for week in range(16):  # daily-ish training from home in 16 different weeks
         act(client, week * 7)
         act(client, week * 7 + 1)
     assert client.get(f"{API}/suggestions").json() == []
@@ -267,3 +268,46 @@ def test_tiles_per_type_and_per_adventure(make_client):
     client.delete(f"{API}/adventures/{b['id']}")
     # detection settings keep working next to the stored tile defaults
     assert client.get(f"{API}/settings").json()["min_days"] == 2
+
+
+def test_neighbouring_valleys_make_a_multiday(make_client):
+    """A week in the mountains: loops from different trailheads 7-12 km apart on following
+    days (with one rest day) is one multi-day trip, not separate hikes."""
+    client = make_client(modules="adventures")
+    offsets = [(0, 0.0), (1, 0.10), (3, 0.05), (4, 0.16), (5, 0.08)]  # (day, degrees east: ~7-12 km apart)
+    ids = [out_and_back(client, d, east_deg=e) for d, e in offsets]
+    act(client, 20, east_deg=0.4)  # a lone hike two weeks later stays alone
+    got = client.get(f"{API}/suggestions").json()
+    assert [(s["activity_ids"], s["type"], s["days"]) for s in got] == [(ids, "multiday", 5)]
+    client.put(f"{API}/settings", json={"area_radius_m": 5000})  # a tighter area splits it
+    assert all(len(s["activity_ids"]) < 5 for s in client.get(f"{API}/suggestions").json())
+
+
+def test_training_near_home_is_skipped_but_trips_from_home_count(make_client):
+    client = make_client(modules="adventures")
+    for week in range(16):  # home: loops from the origin in 16 weeks
+        out_and_back(client, week * 7)
+    # runs around town (8 km from home) on the following days are still everyday training
+    for d in (113, 114):
+        out_and_back(client, d, east_deg=0.11)
+    assert client.get(f"{API}/suggestions").json() == []
+    # leaving home on a traverse: the first day starts at home and ends 12 km away
+    out = 7.0 * 1740
+    trip = [act(client, 120, speed=7.0), act(client, 121, north_m=out), act(client, 122, north_m=out + LEG_M)]
+    got = client.get(f"{API}/suggestions").json()
+    assert [(s["activity_ids"], s["type"]) for s in got] == [(trip, "traverse")]
+
+
+def test_old_settings_are_migrated(make_client):
+    from app.sdk import ModuleDB
+
+    client = make_client(modules="adventures")
+    db = ModuleDB(client.app.state.core, "adventures")
+    t = db.table("settings")
+    db.execute(f"DELETE FROM {t} WHERE key = 'settings_version'")
+    for key, value in (("home_weeks", "8"), ("traverse_max_m", "10000.0"), ("min_days", "3")):
+        db.execute(f"INSERT OR REPLACE INTO {t} (key, value) VALUES (?, ?)", (key, value))
+    again = make_client(modules="adventures")  # same database, the module starts again
+    s = again.get(f"{API}/settings").json()
+    assert s["home_weeks"] == 15 and s["min_days"] == 3  # old default dropped, own choice kept
+    assert s["area_radius_m"] == 20_000 and "traverse_max_m" not in s

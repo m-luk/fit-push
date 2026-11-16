@@ -14,7 +14,8 @@ There are two types:
   default), and at least half of them end away from where they started. A loop from the
   camp in between is fine; a gap such as a bus ride makes it multi-day.
 - **Multi-day**: every other trip: outings from one base on consecutive days (a ski week,
-  a climbing trip from a hut), or moving between places with gaps.
+  a climbing trip from a hut), hikes from trailheads in neighbouring valleys, or moving
+  between places with gaps.
 
 The module also looks through your activities and **proposes** adventures it finds.
 Activities of different sports can be mixed, and activities tagged `#commute` are
@@ -59,12 +60,16 @@ left out unless you change that.
    - **Traverse: each start within … of the previous end** (default 1 km): how close an
      activity must start to where the previous one ended for the trip to count as one
      continuous line.
-   - **Same place: a start within … of an earlier start or end** (default 2 km): how near
-     an activity must start to the trip so far to belong to it.
+   - **Same area: a start within … of the trip so far** (default 20 km): how near an
+     activity must start to an earlier start or end of the trip to belong to it. Big
+     enough for hikes from different valleys of one mountain range.
+   - **Same spot: a loop ends within … of its start** (default 2 km): what counts as a
+     loop (not point-to-point) and how big a home spot is.
    - **Minimum days** (default 2).
-   - **Ignore home** (default 8 weeks): a place where you start activities in this many
-     different weeks counts as home and does not link activities, so your everyday
-     training is not proposed. 0 turns it off.
+   - **Home: a spot used in this many weeks** (default 15; 0 turns it off) and **Home:
+     skip activities starting and ending within …** (default 10 km): activities that
+     start and end that close to a home spot are everyday training and are never part of
+     a trip. A trip may still start at home (the first day ends away).
    - **Excluded tags** (default `commute`) and **Sports that count** (none ticked = any
      sport).
 
@@ -79,7 +84,10 @@ left out unless you change that.
 - Days are calendar days of the recorded start time (UTC), so a late-evening activity
   in a far time zone may fall on the next day.
 - Activities already in an adventure are not proposed again.
-- A trip to a place you visit very often (more weeks than **Ignore home**) is treated as
-  home and not proposed; lower the setting or create the adventure by hand.
+- A place you visit very often (in more weeks than the **Home** setting) counts as home,
+  and trips within the home distance of it are not proposed; raise the weeks, lower the
+  distance, or create the adventure by hand.
+- Trips close to home (within the **Same area** distance) on consecutive days may be
+  proposed as one; dismiss them or lower **Same area**.
 - Fastest and slowest day compare average speeds, even when the days have different
   sports.

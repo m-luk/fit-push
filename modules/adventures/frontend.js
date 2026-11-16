@@ -126,9 +126,11 @@
         <div class="adv-fields">
           <label>Max days without activity between days <input name="max_gap_days" type="number" min="0" max="30" step="1" value="${cfg.max_gap_days}"></label>
           <label>Traverse: each start within (${u}) of the previous end <input name="traverse_link_m" type="number" min="0.05" step="0.05" value="${+(cfg.traverse_link_m / m).toFixed(2)}"></label>
-          <label>Same place: a start within (${u}) of an earlier start or end <input name="base_radius_m" type="number" min="0.1" step="0.1" value="${+(cfg.base_radius_m / m).toFixed(2)}"></label>
+          <label>Same area: a start within (${u}) of the trip so far <input name="area_radius_m" type="number" min="0.1" step="0.5" value="${+(cfg.area_radius_m / m).toFixed(2)}"></label>
+          <label>Same spot: a loop ends within (${u}) of its start <input name="base_radius_m" type="number" min="0.1" step="0.1" value="${+(cfg.base_radius_m / m).toFixed(2)}"></label>
           <label>Minimum days <input name="min_days" type="number" min="1" max="60" step="1" value="${cfg.min_days}"></label>
-          <label>Ignore home (a place used in this many weeks; 0 = off) <input name="home_weeks" type="number" min="0" step="1" value="${cfg.home_weeks}"></label>
+          <label>Home: a spot used in this many weeks (0 = off) <input name="home_weeks" type="number" min="0" step="1" value="${cfg.home_weeks}"></label>
+          <label>Home: skip activities starting and ending within (${u}) of it <input name="home_radius_m" type="number" min="0" step="0.5" value="${+(cfg.home_radius_m / m).toFixed(2)}"></label>
           <label>Excluded tags (comma-separated) <input name="exclude_tags" value="${esc(cfg.exclude_tags.join(", "))}" placeholder="commute"></label>
         </div>
         <fieldset class="adv-sports"><legend>Sports that count <span class="muted adv-small">none ticked = any sport, mixed adventures allowed</span></legend>
@@ -142,6 +144,7 @@
       const body = {
         max_gap_days: +v("max_gap_days"), min_days: +v("min_days"), home_weeks: +v("home_weeks"),
         traverse_link_m: +v("traverse_link_m") * m, base_radius_m: +v("base_radius_m") * m,
+        area_radius_m: +v("area_radius_m") * m, home_radius_m: +v("home_radius_m") * m,
         exclude_tags: v("exclude_tags").split(",").map((t) => t.trim()).filter(Boolean),
         sports: [...f.querySelectorAll("[name=sport]:checked")].map((c) => c.value),
       };
