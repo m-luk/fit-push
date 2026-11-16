@@ -16,18 +16,12 @@ How to update it: see "Changelog" in `AGENTS.md`.
   activity, by day or as a single total line. It proposes adventures automatically;
   sports, excluded tags (default `commute`), the allowed gap between days (default 1
   day) and the traverse distance (default 1 km) can be changed. Proposals unfold to show
-  their activities on a small map. Adventures are named after the national park (or mountain
-  range) and nearest city found on OpenStreetMap (`YYYY-MM Park, City`); this sends one rounded point of the
-  route per proposal (looked up once, in the background) and can be switched off. Saved
-  adventures show at once while detection runs in the background. A traverse must be one
-  continuous line (each start within 1 km of the previous end, mostly point-to-point);
-  other trips are multi-day. Tiles show the highest point, the longest day and the
-  biggest climb, and the map can also be coloured by elevation, speed or heart rate.
-  Place names need the **OpenStreetMap places** module.
-- **OpenStreetMap places** module: a service module (no page) that finds the national
-  park, mountain range and nearest town around a point for other modules. It sends one
-  point rounded to about 100 m per new place, remembers every answer and makes at most
-  one request per second.
+  their activities on a small map, and **Detect again** runs detection once more. Saved
+  adventures show at once while detection runs in the background; deleting an adventure
+  lets its activities be proposed again. A traverse must be one continuous line (each
+  start within 1 km of the previous end, mostly point-to-point); other trips are
+  multi-day. Tiles show the highest point, the longest day and the biggest climb, and the
+  map can also be coloured by elevation, speed or heart rate.
 - Module developers: **service modules** (`--provides service`) and versioned services
   (SDK 1.3). Providers declare `services` with versions and document them in a README
   `## Services` section; consumers declare `uses` with the major version they need and

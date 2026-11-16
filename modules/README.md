@@ -8,7 +8,7 @@ There are two kinds (docs/SDK.md, "Module kinds"):
 
 - **feature modules** give users something: a page, an activity card, an API;
 - **service modules** have no UI and offer versioned **services** to other modules
-  (for example `osm_places`: place names from OpenStreetMap, used by `adventures`).
+  (none ship yet; `gear` is a feature module that also offers services to importers).
 
 Modules talk to each other only through services, declared on both sides
 (`"services"` / `"uses"` in `module.json`) and cross-checked by

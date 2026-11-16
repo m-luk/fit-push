@@ -66,16 +66,8 @@ machine-checkable ones, and CI runs it.
     don't replace `window.fitpush`, don't call `prompt()`/`alert()`, handle missing data
     (no GPS, no HR, no time) gracefully, and keep event handlers fast.
 13. **Privacy:** don't send activity data, locations or anything personal to external
-    services. Map tiles via `sdk.map()` are the exception, and they are already used
-    by the core. A module may also look up open map data (e.g. place names from the
-    OpenStreetMap APIs) when all of this holds: the lookup runs only on a user action
-    (a click, or opening the module's page that shows the result), answers are stored so
-    nothing is asked twice,
-    sends as little as possible (one rounded point, never a track), can be switched off
-    in the module's settings, is described in the UI next to that switch and in the
-    README, and tests never reach the real service. Such lookups belong in a service
-    module that enforces the limits it can (rounding, caching, pacing), like
-    `osm_places`; consumers keep the switch and the user-facing text.
+    services. Map tiles via `sdk.map()` are the only exception, and they are already used
+    by the core.
 14. **Follow the UI conventions** (`.claude/skills/ui-development/SKILL.md`):
     colours from tokens (light and dark), escape all text with `sdk.esc`, view
     state in the URL (`ctx.setParams`), keyboard-usable controls, works at 390 px.

@@ -121,7 +121,7 @@ def _validate_services(manifest: dict) -> list[str]:
         isinstance(k, str) and SERVICE_NAME_RE.match(k) and SERVICE_VERSION_RE.match(str(v))
         for k, v in services.items()
     ):
-        errs.append('services must map service names to "MAJOR.MINOR" versions, e.g. {"place": "1.0"}')
+        errs.append('services must map service names to "MAJOR.MINOR" versions, e.g. {"ensure": "1.0"}')
     elif ("service" in manifest.get("provides", [])) != bool(services):
         errs.append('a module that provides "service" must declare its "services", and only such a module may')
     ok = isinstance(uses, dict) and all(
@@ -133,7 +133,7 @@ def _validate_services(manifest: dict) -> list[str]:
         for mid, names in uses.items()
     )
     if not ok:
-        errs.append('uses must map module ids to {service: major version}, e.g. {"osm_places": {"place": 1}}')
+        errs.append('uses must map module ids to {service: major version}, e.g. {"gear": {"ensure": 1}}')
     return errs
 
 

@@ -49,26 +49,11 @@ Endpoints (under `/api/m/adventures`):
   activity_ids}`.
 - `GET /adventures/{id}`: activities (with day number and track), totals, per-day rows,
   fastest/slowest day, averages per day and per activity; `PATCH` `{name, type, notes}`;
-  `PUT /adventures/{id}/activities` `{activity_ids}`; `DELETE`.
+  `PUT /adventures/{id}/activities` `{activity_ids}`; `DELETE` (keeps the activities and
+  forgets dismissed proposals that contain any of them, so they can be proposed again).
 - `GET /activities?from=&to=`: compact activity list for the "add activities" picker.
 - `GET /tracks?ids=1,2`: GPS lines for the map preview of an unfolded proposal
   (proposals also carry `activities` with id, name, sport, start time and distance).
-- `POST /place` `{activity_ids, refresh}`: the national park, mountain range and nearest city
-  around the route, `{point, park, range, city, name}` (each `{name, inside, distance_m}`
-  or null; `city` also has `kind`), where `name` is the proposed adventure name
-  `"YYYY-MM Park, City"`, with the range in place of the park when there is no park
-  (only the parts found). The answer is stored; `refresh: true` asks again.
-  `POST /adventures/{id}/place` does the same for an adventure and stores the result;
-  `POST /adventures` accepts that result as `place`.
-
-**Place names** come from the **osm_places** service module (service `place` 1.x,
-declared in `uses`; a soft dependency: without it, place names are off and
-`GET /settings` says `osm_available: false`). Adventures picks the point, the middle of
-the route, and builds the name. osm_places rounds the point, sends it, caches the answer
-and paces the requests. Lookups run only when the `osm_names` setting is on (default):
-the page looks up each shown proposal in the background, one at a time, so **Create**
-never waits, and **Find place** asks again. Answers and names are stored in
-`m_adventures_lookups` by activity-id set, so a proposal is looked up once.
 - `GET /activity/{id}`: adventures containing one activity (for the header line).
 
 Events: `activity.deleted` removes the activity from adventures (an adventure left empty
@@ -76,7 +61,7 @@ is deleted); start/end points are cached in memory per activity id.
 
 UI: page **Adventures** (`#/m/adventures`, one adventure at `#/m/adventures?id=<id>`)
 with the saved adventures (shown at once), then the proposals (detected in the
-background), settings and the adventure view: tiles, per-day table and a
+background; **Detect again** runs detection once more), settings and the adventure view: tiles, per-day table and a
 map coloured by activity, by day or as one total line, with a day filter. A header line
 on activity pages links to the adventures the activity belongs to.
 
@@ -85,6 +70,4 @@ on activity pages links to the adventures the activity belongs to.
 Reads activities, summaries, tags and thinned GPS tracks through `ctx.core`. Stores
 `m_adventures_adventures` (id, name, type, notes, created_at),
 `m_adventures_members` (adventure_id, activity_id), `m_adventures_settings`
-(key, JSON value), `m_adventures_dismissed` (proposal key = sorted activity ids) and
-`m_adventures_places` (adventure_id, JSON of the looked-up park, range and city) and
-`m_adventures_lookups` (activity-id set, JSON answer: the OpenStreetMap cache).
+(key, JSON value) and `m_adventures_dismissed` (proposal key = sorted activity ids).

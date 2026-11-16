@@ -8,6 +8,5 @@
   "sdk": "1",
   "provides": ["page", "activity-card", "api", "events"],
   "depends": [],
-  "uses": { "osm_places": { "place": 1 } },
   "enabled_by_default": true
 }

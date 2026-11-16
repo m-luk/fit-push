@@ -12,8 +12,6 @@
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   const U = () => sdk.fmt.units();
-  // "in Kampinos National Park · near Warszawa"
-  const placeText = (p) => [p.park && `${p.park.inside ? "in" : "near"} ${p.park.name}`, p.range && `⛰️ ${p.range.name}`, p.city && `near ${p.city.name}`].filter(Boolean).join(" · ");
   const unitM = () => (U().distL === "mi" ? 1609.344 : 1000);
   const day = (iso) => (iso ? sdk.fmt.day(`${iso.slice(0, 10)}T12:00:00`) : "–"); // a calendar day, not a UTC instant
   const span = (a, b) => (a === b ? day(a) : `${day(a)} – ${day(b)}`);
@@ -47,19 +45,17 @@
   async function renderList(el, ctx) {
     el.innerHTML = `
       <div class="page-head"><div><h1>Adventures</h1><div class="sub" id="adv-sub">Loading…</div></div>
-        <div class="adv-actions"><button type="button" class="btn" id="adv-settings-btn" aria-expanded="false">Detection settings</button>
+        <div class="adv-actions"><button type="button" class="btn" id="adv-detect" title="Look for adventures in your activities again">Detect again</button>
+          <button type="button" class="btn" id="adv-settings-btn" aria-expanded="false">Detection settings</button>
           <button type="button" class="btn primary" id="adv-new">New adventure</button></div></div>
       <div id="adv-settings" hidden></div>
       <div class="adv-grid" id="adv-list"></div>
       <div id="adv-sugg"></div>`;
     const $ = (s) => el.querySelector(s);
     let sugg = null, advs = [], cfg = null, seq = 0; // sugg: null while detection runs
-    // expanded proposal keys; looked-up places by proposal key (a place, or {error} when the lookup failed)
-    const open = new Set(), places = new Map();
-    // place names need the osm_places service module and the user's consent (the setting)
-    const osmOn = () => cfg.osm_names && cfg.osm_available;
+    const open = new Set(); // expanded proposal keys
 
-    // Saved adventures show at once; detection and the place lookups follow in the background.
+    // Saved adventures show at once; detection follows in the background.
     async function load() {
       const mine = ++seq;
       [advs, cfg] = await Promise.all([send("/adventures"), send("/settings")]);
@@ -70,30 +66,7 @@
       if (ctx.isStale() || mine !== seq) return;
       sugg = found;
       drawList(); drawSugg();
-      prefetchPlaces(mine);
     }
-
-    // Names for the proposals, one lookup at a time (the server keeps every result, so a place is
-    // looked up once); each answer only updates its own row, so open previews stay as they are.
-    async function prefetchPlaces(mine) {
-      if (!osmOn()) return;
-      for (const s of sugg) {
-        if (places.has(s.key)) continue;
-        try { places.set(s.key, await send("/place", "POST", { activity_ids: s.activity_ids })); }
-        catch (e) { places.set(s.key, { error: e.message }); }
-        if (ctx.isStale() || mine !== seq) return;
-        showPlace(s.key);
-      }
-    }
-
-    const placeHtml = (key) => {
-      const pl = places.get(key);
-      if (!osmOn()) return "";
-      if (!pl) return '<span class="muted">finding place…</span>';
-      if (pl.error) return '<span class="muted">place not found</span>';
-      return pl.name ? `📍 ${esc(placeText(pl))}` : '<span class="muted">no park or town nearby</span>';
-    };
-    const showPlace = (key) => el.querySelectorAll("[data-place]").forEach((n) => { if (n.dataset.place === key) n.innerHTML = placeHtml(key); });
 
     function drawList() {
       $("#adv-sub").textContent = advs.length ? `${plural(advs.length, "adventure")}` : "Group trips: traverses and multi-day stays.";
@@ -112,7 +85,7 @@
       }
       $("#adv-sugg").innerHTML = sugg.length ? `<div class="card adv-sugg"><h2><span>Proposed adventures</span><span class="muted">${plural(sugg.length, "proposal")}</span></h2>
         <div class="table-scroll"><table class="adv-table"><tbody>${sugg.map((s) => `<tr data-key="${esc(s.key)}">
-          <td><button type="button" class="adv-fold" data-act="fold" aria-expanded="${open.has(s.key)}" aria-label="Show the activities of this proposal">${open.has(s.key) ? "▾" : "▸"}</button> ${typeBadge(s.type)}</td><td>${esc(span(s.first_day, s.last_day))}<div class="adv-small adv-row-place" data-place="${esc(s.key)}">${placeHtml(s.key)}</div></td>
+          <td><button type="button" class="adv-fold" data-act="fold" aria-expanded="${open.has(s.key)}" aria-label="Show the activities of this proposal">${open.has(s.key) ? "▾" : "▸"}</button> ${typeBadge(s.type)}</td><td>${esc(span(s.first_day, s.last_day))}</td>
           <td>${plural(s.days, "day")} · ${nActs(s.activity_ids.length)}</td>
           <td class="num">${dist(s.distance_m)}</td><td>${sportIcons(s.sports)}</td>
           <td class="adv-row-actions"><button type="button" class="btn small primary" data-act="accept">Create</button>
@@ -121,13 +94,12 @@
       drawPreviews();
     }
 
-    // an unfolded proposal: its activities, a small map and the place it is in
+    // an unfolded proposal: its activities and a small map
     function unfolded(s) {
       return `<tr class="adv-unfold" data-key="${esc(s.key)}"><td colspan="6"><div class="adv-unfold-body">
         <div class="adv-preview" data-preview="${esc(s.key)}"></div>
         <div class="adv-unfold-list"><table class="adv-table"><tbody>${s.activities.map((a) => `<tr><td>${esc(day(a.start_time))}</td>
-          <td>${esc(sdk.sports.icon(a.sport))} <a href="#/activity/${a.id}">${esc(a.name)}</a></td><td class="num">${dist(a.distance_m)}</td></tr>`).join("")}</tbody></table>
-          ${osmOn() ? `<div class="adv-place"><button type="button" class="btn small" data-act="place" title="Look the place up again on OpenStreetMap">Find place again</button> <span class="adv-small" data-place="${esc(s.key)}">${placeHtml(s.key)}</span></div>` : ""}</div></div></td></tr>`;
+          <td>${esc(sdk.sports.icon(a.sport))} <a href="#/activity/${a.id}">${esc(a.name)}</a></td><td class="num">${dist(a.distance_m)}</td></tr>`).join("")}</tbody></table></div></div></td></tr>`;
     }
 
     async function drawPreviews() {
@@ -160,9 +132,6 @@
           <label>Ignore home (a place used in this many weeks; 0 = off) <input name="home_weeks" type="number" min="0" step="1" value="${cfg.home_weeks}"></label>
           <label>Excluded tags (comma-separated) <input name="exclude_tags" value="${esc(cfg.exclude_tags.join(", "))}" placeholder="commute"></label>
         </div>
-        <label class="adv-check"><input type="checkbox" name="osm_names"${cfg.osm_names ? " checked" : ""}${cfg.osm_available ? "" : " disabled"}> Use OpenStreetMap for place names
-          ${cfg.osm_available ? "" : '<span class="adv-small">(needs the <b>OpenStreetMap places</b> module, which is not loaded)</span>'}
-          <span class="muted adv-small">(to name proposals, one point of each route, rounded to about 100 m, is sent to the OpenStreetMap Overpass API when this page shows them; each place is looked up once)</span></label>
         <fieldset class="adv-sports"><legend>Sports that count <span class="muted adv-small">none ticked = any sport, mixed adventures allowed</span></legend>
           ${sdk.sports.list().map((s) => `<label class="adv-check"><input type="checkbox" name="sport" value="${esc(s.key)}"${want.has(s.key) ? " checked" : ""}> ${esc(s.icon)} ${esc(s.label)}</label>`).join("")}</fieldset>
         <div class="adv-actions"><button type="submit" class="btn primary small">Save and detect</button>
@@ -176,7 +145,6 @@
         traverse_link_m: +v("traverse_link_m") * m, base_radius_m: +v("base_radius_m") * m,
         exclude_tags: v("exclude_tags").split(",").map((t) => t.trim()).filter(Boolean),
         sports: [...f.querySelectorAll("[name=sport]:checked")].map((c) => c.value),
-        osm_names: f.elements.osm_names.checked,
       };
       try {
         await send("/settings", "PUT", body); sdk.toast("Settings saved");
@@ -189,7 +157,12 @@
     el.addEventListener("click", async (ev) => {
       const t = ev.target;
       try {
-        if (t.closest("#adv-settings-btn")) {
+        if (t.closest("#adv-detect")) {
+          const b = t.closest("button");
+          b.disabled = true;
+          try { await load(); } finally { b.disabled = false; }
+          if (!ctx.isStale() && sugg) sdk.toast(sugg.length ? `${plural(sugg.length, "proposal")} found` : "No new proposals");
+        } else if (t.closest("#adv-settings-btn")) {
           const box = $("#adv-settings"); box.hidden = !box.hidden;
           t.closest("button").setAttribute("aria-expanded", String(!box.hidden));
         } else if (t.closest("#adv-cfg-defaults")) {
@@ -206,19 +179,10 @@
           if (!s) return;
           if (act === "dismiss") { open.delete(s.key); await send("/suggestions/dismiss", "POST", { key: s.key }); await load(); return; }
           if (act === "fold") { open.has(s.key) ? open.delete(s.key) : open.add(s.key); drawSugg(); return; }
-          if (act === "place") {
-            places.delete(s.key); showPlace(s.key);
-            try { places.set(s.key, await send("/place", "POST", { activity_ids: s.activity_ids, refresh: true })); }
-            catch (e) { places.set(s.key, { error: e.message }); sdk.toast(e.message); }
-            if (!ctx.isStale()) showPlace(s.key);
-            return;
-          }
-          // default name: "YYYY-MM Park, City" from the place looked up in the background (never waited for here)
-          const found = places.get(s.key), place = found && !found.error ? found : null;
           const fallback = `${TYPES[s.type][1]} ${span(s.first_day, s.last_day)}`;
-          const name = await sdk.askName(`Create ${TYPES[s.type][1].toLowerCase()} adventure`, `${span(s.first_day, s.last_day)} · ${nActs(s.activity_ids.length)}`, place?.name || fallback, "Create");
+          const name = await sdk.askName(`Create ${TYPES[s.type][1].toLowerCase()} adventure`, `${span(s.first_day, s.last_day)} · ${nActs(s.activity_ids.length)}`, fallback, "Create");
           if (!name) return;
-          const a = await send("/adventures", "POST", { name, type: s.type, activity_ids: s.activity_ids, place });
+          const a = await send("/adventures", "POST", { name, type: s.type, activity_ids: s.activity_ids });
           sdk.navigate(`#/m/adventures?id=${a.id}`);
         }
       } catch (e) { sdk.toast(e.message); }
@@ -244,7 +208,6 @@
         <div class="adv-actions">
           <span class="seg" role="group" aria-label="Adventure type">${Object.entries(TYPES).map(([k, [i, l]]) => `<button type="button" data-type="${k}">${i} ${l}</button>`).join("")}</span>
           <button type="button" class="btn" id="adv-rename">Rename</button>
-          <button type="button" class="btn" id="adv-place" title="Find the national park, mountain range and nearest city on OpenStreetMap (sends one rounded point of the route)">Find place</button>
           <button type="button" class="btn" id="adv-edit" aria-expanded="false">Edit activities</button>
           <button type="button" class="btn danger" id="adv-delete">Delete</button></div></div>
       <div id="adv-picker"></div>
@@ -302,7 +265,7 @@
       const sp = speedFmt(adv.sports);
       $("#adv-title").textContent = adv.name;
       $("#adv-sub").innerHTML = adv.first_day
-        ? `${typeBadge(adv.type)} ${esc(span(adv.first_day, adv.last_day))} · ${plural(adv.days, "active day")} of ${adv.span_days} · ${sportIcons(adv.sports)}${adv.place?.name ? ` · 📍 ${esc(placeText(adv.place))}` : ""}`
+        ? `${typeBadge(adv.type)} ${esc(span(adv.first_day, adv.last_day))} · ${plural(adv.days, "active day")} of ${adv.span_days} · ${sportIcons(adv.sports)}`
         : `${typeBadge(adv.type)} No activities yet: use <b>Edit activities</b>.`;
       if (st.color in METRIC && !hasMetric(st.color)) st.color = "activity";
       const longest = adv.per_day.length ? adv.per_day.reduce((x, y) => (y.distance_m > x.distance_m ? y : x)) : null;
@@ -442,14 +405,6 @@
         else if (t.closest("#adv-rename")) {
           const name = await sdk.askName("Rename adventure", "", adv.name, "Rename");
           if (name && name !== adv.name) { adv = await send(`/adventures/${id}`, "PATCH", { name }); draw(); }
-        } else if (t.closest("#adv-place")) {
-          sdk.toast("Looking up the place on OpenStreetMap…");
-          const place = await send(`/adventures/${id}/place`, "POST");
-          if (ctx.isStale()) return;
-          if (!place.name) { sdk.toast("No national park or town found nearby"); return; }
-          const name = place.name !== adv.name ? await sdk.askName("Rename to the place?", placeText(place), place.name, "Rename") : null;
-          adv = name && name !== adv.name ? await send(`/adventures/${id}`, "PATCH", { name }) : await send(`/adventures/${id}`);
-          draw();
         } else if (t.closest("#adv-edit") || t.closest("#adv-pick-cancel")) {
           st.editing = t.closest("#adv-edit") ? !st.editing : false;
           Object.assign($("#adv-picker").dataset, { picked: "", from: "", to: "" });
@@ -467,8 +422,6 @@
         }
       } catch (e) { sdk.toast(e.message); }
     });
-    // "Find place" only when the osm_places service is loaded and place names are switched on
-    send("/settings").then((c) => { if (!ctx.isStale() && !(c.osm_available && c.osm_names)) $("#adv-place").hidden = true; }).catch(() => {});
     draw();
     await drawPicker();
   }

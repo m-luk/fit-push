@@ -72,15 +72,12 @@ left out unless you change that.
 
 1. Open **Adventures** in the navigation bar. Your saved adventures show at once; below
    them, **Proposed adventures** appear when detection finishes ("Looking for adventures
-   in your activities…" until then). Each row shows the type, the dates, the place (📍,
-   filled in as it is found), the number of days and activities and the distance.
-   Click **▸** at the start of a row to unfold it: you see its activities (each links to
-   the activity) and a small map; **Find place again** repeats the place lookup.
-2. Click **Create** on a proposal. The name is proposed from the place found on
-   OpenStreetMap as
-   `YYYY-MM Park, City` (for example `2026-07 Tatra National Park, Zakopane`); without a
-   national park the mountain range takes its place (`2026-08 Julian Alps, Bovec`). When
-   nothing is found, the name comes from the type and dates. Keep or change it and click **Create** again.
+   in your activities…" until then). Each row shows the type, the dates, the number of
+   days and activities and the distance. Click **▸** at the start of a row to unfold it:
+   you see its activities (each links to the activity) and a small map. **Detect again**
+   (top right) looks through your activities once more, for example after an import.
+2. Click **Create** on a proposal, keep or change the proposed name (type and dates) and
+   click **Create** again.
    Click **Dismiss** to hide a proposal for good (**Show dismissed proposals again**
    brings dismissed ones back).
 3. To build one by hand, click **New adventure**, enter a name, then tick the activities
@@ -96,9 +93,9 @@ left out unless you change that.
    a row of the **Per day** table to focus the map on one day; **All days** shows
    everything again. Click a route to open the activity.
 5. Use the **Traverse** / **Multi-day** buttons to change the type, **Rename** to change
-   the name, **Find place** to look up the park, mountain range and city (and rename the adventure to
-   them if you like), **Edit activities** to add or remove activities, and **Delete** (click
-   twice) to remove the adventure. Deleting an adventure keeps its activities.
+   the name, **Edit activities** to add or remove activities, and **Delete** (click
+   twice) to remove the adventure. Deleting an adventure keeps its activities, and they
+   are proposed again (even if you had dismissed a proposal with them before).
 6. Click **Detection settings** on the Adventures page to change what is proposed:
    - **Max days without activity between days** (default 1): how many empty days may
      lie between two days of one adventure.
@@ -113,7 +110,6 @@ left out unless you change that.
      training is not proposed. 0 turns it off.
    - **Excluded tags** (default `commute`) and **Sports that count** (none ticked = any
      sport).
-   - **Use OpenStreetMap for place names** (on by default): see Limitations.
 
    Click **Save and detect** to apply (the settings close), or **Restore defaults**.
 7. On an activity page, the **Adventure** line under the title links to the adventures
@@ -121,17 +117,6 @@ left out unless you change that.
 
 ### Limitations
 
-- Place names come from OpenStreetMap. To find them, one point in the middle of the
-  route (rounded to about 100 m) is sent to the OpenStreetMap Overpass API for each
-  proposal shown on the Adventures page (each place is looked up once and remembered),
-  and when you click **Find place**. If you click **Create** before the place is found,
-  the name comes from the type and dates. Turn off **Use OpenStreetMap for place
-  names** in the detection settings to never send anything. Place names need the
-  **OpenStreetMap places** module (loaded by default); without it the option is greyed out. The lookup needs an internet
-  connection and can take a few seconds; national parks are found when the route's
-  middle is inside one or within 25 km of its centre, mountain ranges when it is inside
-  one or within 60 km of where OpenStreetMap places the range (often a label point or a
-  ridge line, so a large range may be missed or a neighbouring one chosen).
 - Detection needs GPS and a start time; activities without GPS can still be added by
   hand (they count in the totals but have no line on the map).
 - Days are calendar days of the recorded start time (UTC), so a late-evening activity
@@ -189,36 +174,6 @@ sports (e.g. All cycling), and every new activity of that sport gets it automati
   distance add only time.
 - Trimmed copies (clips) get the default gear of their sport, not the gear of the
   original activity.
-
-## OpenStreetMap places
-
-*Module `osm_places` v0.1.0 · owner @m-luk*
-
-
-### What it does
-
-Finds the national park, the mountain range and the nearest city or town around a place
-on your activities, using OpenStreetMap. It has no page of its own: other modules use it,
-for example **Adventures** to name a trip "2026-07 Tatra National Park, Zakopane".
-
-### How to use
-
-1. Nothing to set up. Keep this module enabled (it is by default) for the modules that
-   use it to show place names; the **Modules** page lists it as loaded.
-2. Turn lookups on or off in the module that uses them (for Adventures:
-   **Detection settings** → **Use OpenStreetMap for place names**).
-3. To stop all lookups at once, start fit-push without this module, for example
-   `python scripts/run.py --modules adventures,gear` (every module except this one).
-
-### Limitations
-
-- Needs an internet connection; a lookup takes a few seconds and runs at most once per
-  second.
-- Each lookup sends one point, rounded to about 100 m, to the OpenStreetMap Overpass API.
-  Answers are remembered per point, so the same place is not asked again.
-- OpenStreetMap often maps a mountain range as a label point or a ridge line, so a large
-  range may be missed or a neighbouring one chosen; parks are found when the point is
-  inside one or within 25 km of its centre.
 
 ## Strava import
 

@@ -64,8 +64,8 @@ and `scripts/modules.py check` cross-checks them.
 
 | Side | `module.json` | Backend |
 |---|---|---|
-| provider | `"provides": [..., "service"]`, `"services": {"place": "1.0"}` (name -> `MAJOR.MINOR`) | `ctx.provide("place", fn)` for every declared name |
-| consumer | `"uses": {"osm_places": {"place": 1}}` (module -> {service: major}) | `fn = ctx.service("osm_places", "place")` when needed |
+| provider | `"provides": [..., "service"]`, `"services": {"ensure": "1.0"}` (name -> `MAJOR.MINOR`) | `ctx.provide("ensure", fn)` for every declared name |
+| consumer | `"uses": {"gear": {"ensure": 1}}` (module -> {service: major}) | `fn = ctx.service("gear", "ensure")` when needed |
 
 | Call | Returns |
 |---|---|
@@ -186,7 +186,7 @@ every colour, so light and dark themes both work.
 | Kind | `provides` | Has | Example |
 |---|---|---|---|
 | **feature module** | `page`, `activity-card`, `api`, `events` (any) | UI and/or HTTP API for users | `gear`, `adventures` |
-| **service module** | `service` (+ `events` if it reacts to core events) | no page, no card, no HTTP API; only services for other modules | `osm_places` |
+| **service module** | `service` (+ `events` if it reacts to core events) | no page, no card, no HTTP API; only services for other modules | none yet (e.g. a place-name lookup) |
 
 A feature module may also offer services (`gear` offers `ensure`, `assign`,
 `add_defaults` to importers), and then lists `service` and `services` too. A service
@@ -215,7 +215,7 @@ How a service is born and changed. Both sides are checked, so follow the order:
 5. **Change, breaking** (major, `1.x` -> `2.0`): renaming or removing an argument or key,
    changing a meaning or unit. Consumers that declared major 1 now get `None`. In the
    same change either update every consumer in the repository (the checker lists
-   mismatches), or keep the old behaviour under a new name (`place_v1`, declared `1.x`)
+   mismatches), or keep the old behaviour under a new name (`ensure_v1`, declared `1.x`)
    until they move, then remove it with a major bump.
 6. **Record it.** Bump the provider's module `version`, note the change in its README and
    in `CHANGELOG.md` when users notice it, and run `python scripts/modules.py check`.

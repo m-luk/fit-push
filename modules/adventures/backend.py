@@ -41,7 +41,6 @@ DEFAULTS: dict = {
     "base_radius_m": 2_000.0,  # grouping: a start within this distance of a start or end of the group
     "min_days": 2,
     "home_weeks": 8,  # a place with starts in this many different weeks is "home"; 0 = off
-    "osm_names": True,  # look up park / city names on OpenStreetMap (one rounded point per lookup)
 }
 
 
@@ -53,14 +52,12 @@ class SettingsIn(BaseModel):
     base_radius_m: float = Field(default=2_000.0, gt=0, le=100_000)
     min_days: int = Field(default=2, ge=1, le=60)
     home_weeks: int = Field(default=8, ge=0, le=1000)
-    osm_names: bool = True
 
 
 class AdventureIn(BaseModel):
     name: str = Field(min_length=1, max_length=120)
     type: Literal["traverse", "multiday"] = "traverse"
     activity_ids: list[int] = Field(default_factory=list, max_length=1000)
-    place: dict | None = None  # a result of POST /place, kept with the adventure
 
 
 class AdventurePatch(BaseModel):
@@ -71,11 +68,6 @@ class AdventurePatch(BaseModel):
 
 class MembersIn(BaseModel):
     activity_ids: list[int] = Field(max_length=1000)
-
-
-class PlaceIn(BaseModel):
-    activity_ids: list[int] = Field(max_length=1000)
-    refresh: bool = False  # look up again instead of using the stored answer
 
 
 class KeyIn(BaseModel):
@@ -109,22 +101,6 @@ def stats(rows: list[dict]) -> dict:
     }
 
 
-# ---- place names (through the osm_places service module) ----------------------------------
-def route_middle(lines: list[list]) -> list[float] | None:
-    """The point halfway along the joined lines (osm_places rounds it before sending)."""
-    pts = [p for line in lines for p in line]
-    if not pts:
-        return None
-    steps = [haversine(a, b) for a, b in itertools.pairwise(pts)]
-    half, run = sum(steps) / 2, 0.0
-    for i, s in enumerate(steps):
-        run += s
-        if run >= half:
-            pts = pts[i + 1 :]
-            break
-    return [pts[0][0], pts[0][1]]
-
-
 def register(ctx: ModuleContext) -> None:
     ctx.db.script(f"""
         CREATE TABLE IF NOT EXISTS {ctx.db.table("adventures")} (
@@ -134,13 +110,10 @@ def register(ctx: ModuleContext) -> None:
             adventure_id INTEGER NOT NULL, activity_id INTEGER NOT NULL, PRIMARY KEY (adventure_id, activity_id));
         CREATE INDEX IF NOT EXISTS {ctx.db.table("members_act")} ON {ctx.db.table("members")} (activity_id);
         CREATE TABLE IF NOT EXISTS {ctx.db.table("settings")} (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-        CREATE TABLE IF NOT EXISTS {ctx.db.table("dismissed")} (key TEXT PRIMARY KEY);
-        CREATE TABLE IF NOT EXISTS {ctx.db.table("places")} (adventure_id INTEGER PRIMARY KEY, value TEXT NOT NULL);
-        CREATE TABLE IF NOT EXISTS {ctx.db.table("lookups")} (key TEXT PRIMARY KEY, value TEXT NOT NULL)
+        CREATE TABLE IF NOT EXISTS {ctx.db.table("dismissed")} (key TEXT PRIMARY KEY)
     """)
     adv_t, mem_t = ctx.db.table("adventures"), ctx.db.table("members")
-    set_t, dis_t, pl_t = ctx.db.table("settings"), ctx.db.table("dismissed"), ctx.db.table("places")
-    look_t = ctx.db.table("lookups")  # place answers + names by activity-id set, so each is built once
+    set_t, dis_t = ctx.db.table("settings"), ctx.db.table("dismissed")
 
     ends_cache: dict[int, tuple[list[float], list[float]] | None] = {}  # id -> (start, end); points never change
     tracks: dict[int, list] = {}
@@ -152,7 +125,6 @@ def register(ctx: ModuleContext) -> None:
         profiles.pop(activity_id, None)
         ctx.db.execute(f"DELETE FROM {mem_t} WHERE activity_id = ?", (activity_id,))
         ctx.db.execute(f"DELETE FROM {adv_t} WHERE id NOT IN (SELECT DISTINCT adventure_id FROM {mem_t})")
-        ctx.db.execute(f"DELETE FROM {pl_t} WHERE adventure_id NOT IN (SELECT id FROM {adv_t})")
 
     ctx.on("activity.deleted", on_deleted)
 
@@ -345,8 +317,7 @@ def register(ctx: ModuleContext) -> None:
     # ---- settings and suggestions --------------------------------------------------------
     @ctx.router.get("/settings")
     def get_settings() -> dict:
-        osm_available = ctx.service("osm_places", "place") is not None
-        return {**settings(), "defaults": DEFAULTS, "osm_available": osm_available}
+        return {**settings(), "defaults": DEFAULTS}
 
     @ctx.router.put("/settings")
     def put_settings(body: SettingsIn) -> dict:
@@ -393,8 +364,6 @@ def register(ctx: ModuleContext) -> None:
         except NotFound:
             ctx.db.execute(f"DELETE FROM {adv_t} WHERE id = ?", (adv_id,))
             raise
-        if body.place:
-            store_place(adv_id, body.place)
         return detail(adv_id)
 
     @ctx.router.get("/adventures/{adv_id}")
@@ -446,7 +415,6 @@ def register(ctx: ModuleContext) -> None:
                 else None,
                 "avg_per_day": {k: out[k] / n_days for k in keys},
                 "avg_per_activity": {k: out[k] / n_acts for k in keys},
-                "place": stored_place(adv_id),
             }
         )
         return out
@@ -467,55 +435,17 @@ def register(ctx: ModuleContext) -> None:
 
     @ctx.router.delete("/adventures/{adv_id}", status_code=204)
     def delete(adv_id: int) -> None:
+        """Remove an adventure; its activities are kept and can be proposed again (also
+        when an earlier proposal with them was dismissed)."""
         adventure(adv_id)
+        freed = set(member_ids(adv_id))
+        for r in ctx.db.query(f"SELECT key FROM {dis_t}"):
+            if freed & {int(i) for i in r["key"].split(",") if i.isdigit()}:
+                ctx.db.execute(f"DELETE FROM {dis_t} WHERE key = ?", (r["key"],))
         ctx.db.execute(f"DELETE FROM {mem_t} WHERE adventure_id = ?", (adv_id,))
-        ctx.db.execute(f"DELETE FROM {pl_t} WHERE adventure_id = ?", (adv_id,))
         ctx.db.execute(f"DELETE FROM {adv_t} WHERE id = ?", (adv_id,))
 
-    # ---- places (OpenStreetMap) and preview tracks ---------------------------------------
-    def stored_place(adv_id: int) -> dict | None:
-        rows = ctx.db.query(f"SELECT value FROM {pl_t} WHERE adventure_id = ?", (adv_id,))
-        return json.loads(rows[0]["value"]) if rows else None
-
-    def store_place(adv_id: int, place: dict) -> None:
-        keep = {k: place.get(k) for k in ("point", "park", "range", "city", "name")}
-        ctx.db.execute(f"INSERT OR REPLACE INTO {pl_t} (adventure_id, value) VALUES (?, ?)", (adv_id, json.dumps(keep)))
-
-    def lookup(ids: list[int], refresh: bool = False) -> dict:
-        """Park, range and city around the middle of the route; ``name`` = "YYYY-MM Park, City"
-        (or None). Answers are stored per set of activities; ``refresh`` asks again."""
-        if not settings()["osm_names"]:
-            raise Invalid("OpenStreetMap lookups are switched off in the detection settings")
-        key = ",".join(map(str, sorted(set(ids))))
-        cached = ctx.db.query(f"SELECT value FROM {look_t} WHERE key = ?", (key,))
-        if cached and not refresh:
-            return json.loads(cached[0]["value"])
-        acts = {a["id"]: a for a in ctx.core.list_activities()}
-        rows = sorted((row(acts[i]) for i in ids if i in acts), key=lambda r: r["start_time"] or "")
-        point = route_middle([track(r["id"]) for r in rows if r["has_gps"]])
-        if point is None:
-            raise Invalid("none of these activities has GPS")
-        osm = ctx.service("osm_places", "place")  # version checked against module.json "uses"
-        if osm is None:
-            raise Invalid("place names need the OpenStreetMap places module (osm_places 1.x)")
-        place = dict(osm(point[0], point[1], refresh=refresh))
-        names = [p["name"] for p in (place["park"] or place["range"], place["city"]) if p]  # park beats range
-        first = next((r["start_time"] for r in rows if r["start_time"]), None)
-        place["name"] = f"{first[:7]} {', '.join(names)}" if names and first else (", ".join(names) or None)
-        ctx.db.execute(f"INSERT OR REPLACE INTO {look_t} (key, value) VALUES (?, ?)", (key, json.dumps(place)))
-        return place
-
-    @ctx.router.post("/place")
-    def find_place(body: PlaceIn) -> dict:
-        return lookup(body.activity_ids, body.refresh)
-
-    @ctx.router.post("/adventures/{adv_id}/place")
-    def find_adventure_place(adv_id: int) -> dict:
-        adventure(adv_id)
-        place = lookup(member_ids(adv_id), refresh=True)
-        store_place(adv_id, place)
-        return place
-
+    # ---- preview tracks --------------------------------------------------------------------
     @ctx.router.get("/tracks")
     def preview_tracks(ids: str = "") -> list[dict]:
         """GPS lines of the given activity ids (comma-separated), for proposal previews."""
