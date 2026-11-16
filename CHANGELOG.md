@@ -8,6 +8,8 @@ How to update it: see "Changelog" in `AGENTS.md`.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-16
+
 ### Added
 
 - The desktop app opens fit-push in its own window with the fit-push name and icon (app
@@ -93,6 +95,7 @@ How to update it: see "Changelog" in `AGENTS.md`.
 - Pages and static files are served with `Cache-Control: no-cache`, so a normal refresh
   picks up a new version.
 
-[Unreleased]: https://github.com/m-luk/fit-push/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/m-luk/fit-push/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/m-luk/fit-push/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/m-luk/fit-push/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/m-luk/fit-push/releases/tag/v0.3.0
