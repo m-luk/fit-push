@@ -18,7 +18,8 @@ How to update it: see "Changelog" in `AGENTS.md`.
   day) and the traverse distance (default 10 km) can be changed. Proposals unfold to show
   their activities on a small map. Adventures are named after the national park (or mountain
   range) and nearest city found on OpenStreetMap (`YYYY-MM Park, City`); this sends one rounded point of the
-  route on Create or **Find place** and can be switched off.
+  route per proposal (looked up once, in the background) and can be switched off. Saved
+  adventures show at once while detection runs in the background.
 
 ## [0.4.0] - 2026-11-16
 

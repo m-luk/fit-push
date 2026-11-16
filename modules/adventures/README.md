@@ -45,16 +45,18 @@ Endpoints (under `/api/m/adventures`):
 - `GET /activities?from=&to=`: compact activity list for the "add activities" picker.
 - `GET /tracks?ids=1,2`: GPS lines for the map preview of an unfolded proposal
   (proposals also carry `activities` with id, name, sport, start time and distance).
-- `POST /place` `{activity_ids}`: the national park, mountain range and nearest city
+- `POST /place` `{activity_ids, refresh}`: the national park, mountain range and nearest city
   around the route, `{point, park, range, city, name}` (each `{name, inside, distance_m}`
   or null; `city` also has `kind`), where `name` is the proposed adventure name
   `"YYYY-MM Park, City"`, with the range in place of the park when there is no park
-  (only the parts found).
+  (only the parts found). The answer is stored; `refresh: true` asks again.
   `POST /adventures/{id}/place` does the same for an adventure and stores the result;
   `POST /adventures` accepts that result as `place`.
 
-**OpenStreetMap lookup** (rule 13 exception): only on a user action (**Create** on a
-proposal, **Find place**) and only when the `osm_names` setting is on (default). It sends
+**OpenStreetMap lookup** (rule 13 exception): only when the `osm_names` setting is on
+(default). The page looks up each shown proposal in the background, one request at a
+time, so **Create** never waits; **Find place** asks again. Answers are stored in
+`m_adventures_lookups` by activity-id set, so a proposal is looked up once. It sends
 one point, the middle of the route rounded to 3 decimals (~100 m), to the Overpass API
 (`FITPUSH_OVERPASS_URL` overrides the endpoint; tests use a local fake). The query
 asks for national parks (`boundary=national_park` or `boundary=protected_area` with
@@ -67,7 +69,8 @@ Events: `activity.deleted` removes the activity from adventures (an adventure le
 is deleted); start/end points are cached in memory per activity id.
 
 UI: page **Adventures** (`#/m/adventures`, one adventure at `#/m/adventures?id=<id>`)
-with proposals, the list, settings and the adventure view: tiles, per-day table and a
+with the saved adventures (shown at once), then the proposals (detected in the
+background), settings and the adventure view: tiles, per-day table and a
 map coloured by activity, by day or as one total line, with a day filter. A header line
 on activity pages links to the adventures the activity belongs to.
 
@@ -77,4 +80,5 @@ Reads activities, summaries, tags and thinned GPS tracks through `ctx.core`. Sto
 `m_adventures_adventures` (id, name, type, notes, created_at),
 `m_adventures_members` (adventure_id, activity_id), `m_adventures_settings`
 (key, JSON value), `m_adventures_dismissed` (proposal key = sorted activity ids) and
-`m_adventures_places` (adventure_id, JSON of the looked-up park, range and city).
+`m_adventures_places` (adventure_id, JSON of the looked-up park, range and city) and
+`m_adventures_lookups` (activity-id set, JSON answer: the OpenStreetMap cache).

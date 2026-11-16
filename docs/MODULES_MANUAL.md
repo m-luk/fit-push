@@ -67,12 +67,14 @@ left out unless you change that.
 
 ### How to use
 
-1. Open **Adventures** in the navigation bar. Under **Proposed adventures** each row
-   shows the type, the dates, the number of days and activities and the distance.
+1. Open **Adventures** in the navigation bar. Your saved adventures show at once; below
+   them, **Proposed adventures** appear when detection finishes ("Looking for adventures
+   in your activities…" until then). Each row shows the type, the dates, the place (📍,
+   filled in as it is found), the number of days and activities and the distance.
    Click **▸** at the start of a row to unfold it: you see its activities (each links to
-   the activity) and a small map; **Find place** shows the national park, the mountain range
-   and the nearest city.
-2. Click **Create** on a proposal. The name is proposed from OpenStreetMap as
+   the activity) and a small map; **Find place again** repeats the place lookup.
+2. Click **Create** on a proposal. The name is proposed from the place found on
+   OpenStreetMap as
    `YYYY-MM Park, City` (for example `2026-07 Tatra National Park, Zakopane`); without a
    national park the mountain range takes its place (`2026-08 Julian Alps, Bovec`). When
    nothing is found, the name comes from the type and dates. Keep or change it and click **Create** again.
@@ -111,8 +113,10 @@ left out unless you change that.
 ### Limitations
 
 - Place names come from OpenStreetMap. To find them, one point in the middle of the
-  route (rounded to about 100 m) is sent to the OpenStreetMap Overpass API, only when you
-  click **Create** on a proposal or **Find place**. Turn off **Use OpenStreetMap for place
+  route (rounded to about 100 m) is sent to the OpenStreetMap Overpass API for each
+  proposal shown on the Adventures page (each place is looked up once and remembered),
+  and when you click **Find place**. If you click **Create** before the place is found,
+  the name comes from the type and dates. Turn off **Use OpenStreetMap for place
   names** in the detection settings to never send anything. The lookup needs an internet
   connection and can take a few seconds; national parks are found when the route's
   middle is inside one or within 25 km of its centre, mountain ranges when it is inside

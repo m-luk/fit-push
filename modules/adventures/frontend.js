@@ -53,44 +53,79 @@
       <div class="adv-grid" id="adv-list"></div>
       <div id="adv-sugg"></div>`;
     const $ = (s) => el.querySelector(s);
-    let sugg = [], advs = [], cfg = null;
-    const open = new Set(), places = new Map(); // expanded proposal keys, looked-up places
+    let sugg = null, advs = [], cfg = null, seq = 0; // sugg: null while detection runs
+    // expanded proposal keys; looked-up places by proposal key (a place, or {error} when the lookup failed)
+    const open = new Set(), places = new Map();
 
+    // Saved adventures show at once; detection and the place lookups follow in the background.
     async function load() {
-      [sugg, advs, cfg] = await Promise.all([send("/suggestions"), send("/adventures"), send("/settings")]);
-      if (ctx.isStale()) return;
-      draw();
+      const mine = ++seq;
+      [advs, cfg] = await Promise.all([send("/adventures"), send("/settings")]);
+      if (ctx.isStale() || mine !== seq) return;
+      sugg = null;
+      drawList(); drawSugg(); drawSettings();
+      const found = await send("/suggestions").catch((e) => { sdk.toast(`Detection failed: ${e.message}`); return []; });
+      if (ctx.isStale() || mine !== seq) return;
+      sugg = found;
+      drawList(); drawSugg();
+      prefetchPlaces(mine);
     }
 
-    function draw() {
+    // Names for the proposals, one lookup at a time (the server keeps every result, so a place is
+    // looked up once); each answer only updates its own row, so open previews stay as they are.
+    async function prefetchPlaces(mine) {
+      if (!cfg.osm_names) return;
+      for (const s of sugg) {
+        if (places.has(s.key)) continue;
+        try { places.set(s.key, await send("/place", "POST", { activity_ids: s.activity_ids })); }
+        catch (e) { places.set(s.key, { error: e.message }); }
+        if (ctx.isStale() || mine !== seq) return;
+        showPlace(s.key);
+      }
+    }
+
+    const placeHtml = (key) => {
+      const pl = places.get(key);
+      if (!cfg.osm_names) return "";
+      if (!pl) return '<span class="muted">finding place…</span>';
+      if (pl.error) return '<span class="muted">place not found</span>';
+      return pl.name ? `📍 ${esc(placeText(pl))}` : '<span class="muted">no park or town nearby</span>';
+    };
+    const showPlace = (key) => el.querySelectorAll("[data-place]").forEach((n) => { if (n.dataset.place === key) n.innerHTML = placeHtml(key); });
+
+    function drawList() {
       $("#adv-sub").textContent = advs.length ? `${plural(advs.length, "adventure")}` : "Group trips: traverses and multi-day stays.";
-      $("#adv-sugg").innerHTML = sugg.length ? `<div class="card adv-sugg"><h2><span>Proposed adventures</span><span class="muted">${plural(sugg.length, "proposal")}</span></h2>
-        <div class="table-scroll"><table class="adv-table"><tbody>${sugg.map((s) => `<tr data-key="${esc(s.key)}">
-          <td><button type="button" class="adv-fold" data-act="fold" aria-expanded="${open.has(s.key)}" aria-label="Show the activities of this proposal">${open.has(s.key) ? "▾" : "▸"}</button> ${typeBadge(s.type)}</td><td>${esc(span(s.first_day, s.last_day))}</td>
-          <td>${plural(s.days, "day")} · ${nActs(s.activity_ids.length)}</td>
-          <td class="num">${dist(s.distance_m)}</td><td>${sportIcons(s.sports)}</td>
-          <td class="adv-row-actions"><button type="button" class="btn small primary" data-act="accept">Create</button>
-            <button type="button" class="btn small ghost" data-act="dismiss">Dismiss</button></td></tr>${open.has(s.key) ? unfolded(s) : ""}`).join("")}</tbody></table></div></div>`
-        : `<div class="card muted adv-empty">No new proposals. Detection looks for chained tracks (traverses) and outings from one base on consecutive days. <button type="button" class="adv-link" id="adv-undismiss">Show dismissed proposals again</button></div>`;
       $("#adv-list").innerHTML = advs.map((a) => `<a class="card adv-card" href="#/m/adventures?id=${a.id}">
           <div class="adv-card-head"><h3>${esc(a.name)}</h3>${typeBadge(a.type)}</div>
           <div class="muted adv-small">${a.first_day ? esc(span(a.first_day, a.last_day)) : "No activities yet"}</div>
           <div class="adv-card-stats"><span><b>${dist(a.distance_m)}</b></span><span>${plural(a.days, "day")}</span>
             <span>${esc(sdk.fmt.dur(a.moving_s))}</span><span>${sportIcons(a.sports)}</span></div></a>`).join("")
-        || (sugg.length ? "" : '<div class="card muted">No adventures yet. Use <b>New adventure</b>, or create one from a proposal.</div>');
-      drawSettings();
+        || (sugg && !sugg.length ? '<div class="card muted">No adventures yet. Use <b>New adventure</b>, or create one from a proposal.</div>' : "");
+    }
+
+    function drawSugg() {
+      if (!sugg) {
+        $("#adv-sugg").innerHTML = '<div class="card muted adv-empty" role="status"><span class="adv-spin" aria-hidden="true"></span> Looking for adventures in your activities…</div>';
+        return;
+      }
+      $("#adv-sugg").innerHTML = sugg.length ? `<div class="card adv-sugg"><h2><span>Proposed adventures</span><span class="muted">${plural(sugg.length, "proposal")}</span></h2>
+        <div class="table-scroll"><table class="adv-table"><tbody>${sugg.map((s) => `<tr data-key="${esc(s.key)}">
+          <td><button type="button" class="adv-fold" data-act="fold" aria-expanded="${open.has(s.key)}" aria-label="Show the activities of this proposal">${open.has(s.key) ? "▾" : "▸"}</button> ${typeBadge(s.type)}</td><td>${esc(span(s.first_day, s.last_day))}<div class="adv-small adv-row-place" data-place="${esc(s.key)}">${placeHtml(s.key)}</div></td>
+          <td>${plural(s.days, "day")} · ${nActs(s.activity_ids.length)}</td>
+          <td class="num">${dist(s.distance_m)}</td><td>${sportIcons(s.sports)}</td>
+          <td class="adv-row-actions"><button type="button" class="btn small primary" data-act="accept">Create</button>
+            <button type="button" class="btn small ghost" data-act="dismiss">Dismiss</button></td></tr>${open.has(s.key) ? unfolded(s) : ""}`).join("")}</tbody></table></div></div>`
+        : `<div class="card muted adv-empty">No new proposals. Detection looks for chained tracks (traverses) and outings from one base on consecutive days. <button type="button" class="adv-link" id="adv-undismiss">Show dismissed proposals again</button></div>`;
       drawPreviews();
     }
 
     // an unfolded proposal: its activities, a small map and the place it is in
     function unfolded(s) {
-      const pl = places.get(s.key);
-      const where = pl ? (pl.name ? `📍 ${esc(placeText(pl))}` : "No park or town found nearby.") : "";
       return `<tr class="adv-unfold" data-key="${esc(s.key)}"><td colspan="6"><div class="adv-unfold-body">
         <div class="adv-preview" data-preview="${esc(s.key)}"></div>
         <div class="adv-unfold-list"><table class="adv-table"><tbody>${s.activities.map((a) => `<tr><td>${esc(day(a.start_time))}</td>
           <td>${esc(sdk.sports.icon(a.sport))} <a href="#/activity/${a.id}">${esc(a.name)}</a></td><td class="num">${dist(a.distance_m)}</td></tr>`).join("")}</tbody></table>
-          ${cfg.osm_names ? `<div class="adv-place"><button type="button" class="btn small" data-act="place">Find place</button> <span class="adv-small">${where}</span></div>` : ""}</div></div></td></tr>`;
+          ${cfg.osm_names ? `<div class="adv-place"><button type="button" class="btn small" data-act="place" title="Look the place up again on OpenStreetMap">Find place again</button> <span class="adv-small" data-place="${esc(s.key)}">${placeHtml(s.key)}</span></div>` : ""}</div></div></td></tr>`;
     }
 
     async function drawPreviews() {
@@ -111,14 +146,6 @@
       }
     }
 
-    async function placeOf(s) {
-      if (!places.has(s.key)) {
-        sdk.toast("Looking up the place on OpenStreetMap…");
-        places.set(s.key, await send("/place", "POST", { activity_ids: s.activity_ids }));
-      }
-      return places.get(s.key);
-    }
-
     function drawSettings() {
       const m = unitM(), u = U().distL;
       const want = new Set(cfg.sports);
@@ -132,7 +159,7 @@
           <label>Excluded tags (comma-separated) <input name="exclude_tags" value="${esc(cfg.exclude_tags.join(", "))}" placeholder="commute"></label>
         </div>
         <label class="adv-check"><input type="checkbox" name="osm_names"${cfg.osm_names ? " checked" : ""}> Use OpenStreetMap for place names
-          <span class="muted adv-small">(when you create an adventure or click Find place, one point of the route, rounded to about 100 m, is sent to the OpenStreetMap Overpass API)</span></label>
+          <span class="muted adv-small">(to name proposals, one point of each route, rounded to about 100 m, is sent to the OpenStreetMap Overpass API when this page shows them; each place is looked up once)</span></label>
         <fieldset class="adv-sports"><legend>Sports that count <span class="muted adv-small">none ticked = any sport, mixed adventures allowed</span></legend>
           ${sdk.sports.list().map((s) => `<label class="adv-check"><input type="checkbox" name="sport" value="${esc(s.key)}"${want.has(s.key) ? " checked" : ""}> ${esc(s.icon)} ${esc(s.label)}</label>`).join("")}</fieldset>
         <div class="adv-actions"><button type="submit" class="btn primary small">Save and detect</button>
@@ -175,17 +202,16 @@
           const s = sugg.find((x) => x.key === t.closest("[data-key]").dataset.key), act = t.closest("[data-act]").dataset.act;
           if (!s) return;
           if (act === "dismiss") { open.delete(s.key); await send("/suggestions/dismiss", "POST", { key: s.key }); await load(); return; }
-          if (act === "fold") { open.has(s.key) ? open.delete(s.key) : open.add(s.key); draw(); return; }
+          if (act === "fold") { open.has(s.key) ? open.delete(s.key) : open.add(s.key); drawSugg(); return; }
           if (act === "place") {
-            places.delete(s.key);
-            try { await placeOf(s); } catch (e) { sdk.toast(e.message); }
-            if (!ctx.isStale()) draw();
+            places.delete(s.key); showPlace(s.key);
+            try { places.set(s.key, await send("/place", "POST", { activity_ids: s.activity_ids, refresh: true })); }
+            catch (e) { places.set(s.key, { error: e.message }); sdk.toast(e.message); }
+            if (!ctx.isStale()) showPlace(s.key);
             return;
           }
-          // default name: "YYYY-MM Park, City" when OpenStreetMap finds the place
-          let place = null;
-          if (cfg.osm_names) { try { place = await placeOf(s); } catch (e) { sdk.toast(`No place name: ${e.message}`); } }
-          if (ctx.isStale()) return;
+          // default name: "YYYY-MM Park, City" from the place looked up in the background (never waited for here)
+          const found = places.get(s.key), place = found && !found.error ? found : null;
           const fallback = `${TYPES[s.type][1]} ${span(s.first_day, s.last_day)}`;
           const name = await sdk.askName(`Create ${TYPES[s.type][1].toLowerCase()} adventure`, `${span(s.first_day, s.last_day)} · ${nActs(s.activity_ids.length)}`, place?.name || fallback, "Create");
           if (!name) return;

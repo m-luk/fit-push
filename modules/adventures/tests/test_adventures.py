@@ -274,9 +274,24 @@ def test_place_lookup_mountain_range(make_client, monkeypatch):
     assert "natural=mountain_range" in fake.queries[0]
     fake2 = FakeOverpass([RANGE_INSIDE, PARK_INSIDE, CITY])
     monkeypatch.setenv("FITPUSH_OVERPASS_URL", fake2.url)
-    place = client.post(f"{API}/place", json={"activity_ids": ids}).json()
+    place = client.post(f"{API}/place", json={"activity_ids": ids, "refresh": True}).json()
     assert place["range"] == {"name": "Pasmo", "inside": True, "distance_m": 0.0}
     assert place["park"]["name"] == "Kampinos National Park"
     assert place["name"] == "2026-11 Kampinos National Park, Warszawa"  # a park beats the range
     adv = client.post(f"{API}/adventures", json={"name": "x", "activity_ids": ids, "place": place}).json()
     assert adv["place"]["range"]["name"] == "Pasmo"
+
+
+def test_place_lookups_are_stored(make_client, monkeypatch):
+    fake = FakeOverpass([PARK_INSIDE, CITY])
+    monkeypatch.setenv("FITPUSH_OVERPASS_URL", fake.url)
+    client = make_client(modules="adventures")
+    ids = traverse(client)
+    first = client.post(f"{API}/place", json={"activity_ids": ids}).json()
+    assert client.post(f"{API}/place", json={"activity_ids": list(reversed(ids))}).json() == first
+    assert len(fake.queries) == 1  # the second answer came from the store
+    client.post(f"{API}/place", json={"activity_ids": ids, "refresh": True})
+    assert len(fake.queries) == 2
+    adv = client.post(f"{API}/adventures", json={"name": "x", "activity_ids": ids}).json()
+    client.post(f"{API}/adventures/{adv['id']}/place")  # an explicit click always asks again
+    assert len(fake.queries) == 3

@@ -61,6 +61,11 @@ class MembersIn(BaseModel):
     activity_ids: list[int] = Field(max_length=1000)
 
 
+class PlaceIn(BaseModel):
+    activity_ids: list[int] = Field(max_length=1000)
+    refresh: bool = False  # look up again instead of using the stored answer
+
+
 class KeyIn(BaseModel):
     key: str = Field(min_length=1, max_length=20_000)
 
@@ -177,10 +182,12 @@ def register(ctx: ModuleContext) -> None:
         CREATE INDEX IF NOT EXISTS {ctx.db.table("members_act")} ON {ctx.db.table("members")} (activity_id);
         CREATE TABLE IF NOT EXISTS {ctx.db.table("settings")} (key TEXT PRIMARY KEY, value TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS {ctx.db.table("dismissed")} (key TEXT PRIMARY KEY);
-        CREATE TABLE IF NOT EXISTS {ctx.db.table("places")} (adventure_id INTEGER PRIMARY KEY, value TEXT NOT NULL)
+        CREATE TABLE IF NOT EXISTS {ctx.db.table("places")} (adventure_id INTEGER PRIMARY KEY, value TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS {ctx.db.table("lookups")} (key TEXT PRIMARY KEY, value TEXT NOT NULL)
     """)
     adv_t, mem_t = ctx.db.table("adventures"), ctx.db.table("members")
     set_t, dis_t, pl_t = ctx.db.table("settings"), ctx.db.table("dismissed"), ctx.db.table("places")
+    look_t = ctx.db.table("lookups")  # OpenStreetMap answers by activity-id set, so each is asked once
 
     ends_cache: dict[int, tuple[list[float], list[float]] | None] = {}  # id -> (start, end); points never change
     tracks: dict[int, list] = {}
@@ -462,10 +469,15 @@ def register(ctx: ModuleContext) -> None:
         keep = {k: place.get(k) for k in ("point", "park", "range", "city", "name")}
         ctx.db.execute(f"INSERT OR REPLACE INTO {pl_t} (adventure_id, value) VALUES (?, ?)", (adv_id, json.dumps(keep)))
 
-    def lookup(ids: list[int]) -> dict:
-        """Park and city around the middle of the route; ``name`` = "YYYY-MM Park, City" (or None)."""
+    def lookup(ids: list[int], refresh: bool = False) -> dict:
+        """Park, range and city around the middle of the route; ``name`` = "YYYY-MM Park, City"
+        (or None). Answers are stored per set of activities; ``refresh`` asks again."""
         if not settings()["osm_names"]:
             raise Invalid("OpenStreetMap lookups are switched off in the detection settings")
+        key = ",".join(map(str, sorted(set(ids))))
+        cached = ctx.db.query(f"SELECT value FROM {look_t} WHERE key = ?", (key,))
+        if cached and not refresh:
+            return json.loads(cached[0]["value"])
         acts = {a["id"]: a for a in ctx.core.list_activities()}
         rows = sorted((row(acts[i]) for i in ids if i in acts), key=lambda r: r["start_time"] or "")
         point = route_middle([track(r["id"]) for r in rows if r["has_gps"]])
@@ -475,16 +487,17 @@ def register(ctx: ModuleContext) -> None:
         names = [p["name"] for p in (place["park"] or place["range"], place["city"]) if p]  # park beats range
         first = next((r["start_time"] for r in rows if r["start_time"]), None)
         place["name"] = f"{first[:7]} {', '.join(names)}" if names and first else (", ".join(names) or None)
+        ctx.db.execute(f"INSERT OR REPLACE INTO {look_t} (key, value) VALUES (?, ?)", (key, json.dumps(place)))
         return place
 
     @ctx.router.post("/place")
-    def find_place(body: MembersIn) -> dict:
-        return lookup(body.activity_ids)
+    def find_place(body: PlaceIn) -> dict:
+        return lookup(body.activity_ids, body.refresh)
 
     @ctx.router.post("/adventures/{adv_id}/place")
     def find_adventure_place(adv_id: int) -> dict:
         adventure(adv_id)
-        place = lookup(member_ids(adv_id))
+        place = lookup(member_ids(adv_id), refresh=True)
         store_place(adv_id, place)
         return place
 
