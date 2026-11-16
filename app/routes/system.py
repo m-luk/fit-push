@@ -9,7 +9,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
-from .. import __version__
+from .. import __version__, paths
 from ..core import Core
 from . import get_core
 
@@ -23,10 +23,20 @@ class SettingsIn(BaseModel):
     ftp: int | None = Field(default=None, ge=50, le=600)
 
 
+Key = Annotated[str, Field(pattern=r"^[a-z0-9_]{1,40}$")]
+
+
+class PreferencesIn(BaseModel):
+    map_overlay: Key | None = None
+    map_palette: Key | None = None
+    map_reverse: bool | None = None
+    tiles: dict[Key, Annotated[list[Key], Field(max_length=60)] | None] | None = Field(default=None, max_length=100)
+
+
 @router.get("/version")
 def version():
     """Identifies a running fit-push (the desktop launcher uses it to find an open instance)."""
-    return {"app": "fit-push", "version": __version__}
+    return {"app": "fit-push", "version": __version__, "instance": paths.instance()}
 
 
 @router.get("/sports")
@@ -44,6 +54,17 @@ def get_settings(core: CoreDep):
 def put_settings(core: CoreDep, body: SettingsIn):
     """Save athlete settings; stored summaries are recalculated."""
     return core.update_settings(body.model_dump(exclude_none=True))
+
+
+@router.get("/preferences")
+def get_preferences(core: CoreDep):
+    return core.preferences()
+
+
+@router.put("/preferences")
+def put_preferences(core: CoreDep, body: PreferencesIn):
+    """Display defaults (map colouring, tiles per sport); ``tiles: {sport: null}`` restores a sport's defaults."""
+    return core.update_preferences(body.model_dump(exclude_unset=True, exclude_none=False))
 
 
 @router.get("/stats")

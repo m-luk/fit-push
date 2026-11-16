@@ -29,6 +29,7 @@ CREATE TABLE IF NOT EXISTS activities (
 CREATE INDEX IF NOT EXISTS ix_activities_start ON activities(start_time);
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS preferences (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS segments (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
@@ -203,6 +204,24 @@ class Store:
                     (k, json.dumps(v)),
                 )
         return self.get_settings()
+
+    # ---------------------------------------------------------------- display preferences
+    # Kept in the database, not the browser: the desktop app may get another port (and so
+    # another browser origin with empty localStorage) on every start.
+    def get_preferences(self) -> dict:
+        with self._tx() as c:
+            rows = c.execute("SELECT key, value FROM preferences").fetchall()
+        return {r["key"]: json.loads(r["value"]) for r in rows}
+
+    def set_preferences(self, values: dict) -> dict:
+        with self._tx() as c:
+            for k, v in values.items():
+                c.execute(
+                    "INSERT INTO preferences (key, value) VALUES (?, ?) "
+                    "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                    (k, json.dumps(v)),
+                )
+        return self.get_preferences()
 
     # ---------------------------------------------------------------- meta (internal bookkeeping)
     def get_meta(self, key: str):

@@ -64,8 +64,10 @@ cd fit-push
 python scripts/run.py
 ```
 
-Open **http://127.0.0.1:8000**. The first start takes a minute while it installs what it
-needs; later starts are instant. Stop it with **Ctrl+C**.
+fit-push opens in its own window, like the desktop app. The first start takes a minute
+while it installs what it needs; later starts are instant. Close the window (or press
+**Ctrl+C**) to stop it. `python scripts/run.py --no-desktop` runs only the server, at
+**http://127.0.0.1:8000**.
 
 ## Your data is safe
 

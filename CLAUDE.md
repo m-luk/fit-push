@@ -16,5 +16,6 @@ follow it; it is imported below so it is always in context.
 - Before every commit run the quality gates: `python scripts/run.py --tests`,
   `ruff check . && ruff format --check .`, `ty check`, `python scripts/modules.py check`.
 - Servers you start for checks: use a scratch `FITPUSH_DB` (or `--db`), a
-  non-default port and `--no-backup`, and stop them when done.
+  non-default port, `--no-backup` and `--no-desktop` (`run.py` otherwise opens an app
+  window on the user's screen), and stop them when done.
 - Keep AGENTS.md current: new conventions, invariants or gotchas go there (not here).

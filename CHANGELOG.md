@@ -35,11 +35,36 @@ How to update it: see "Changelog" in `AGENTS.md`.
   `scripts/modules.py check` cross-checks both sides, the registry lists them, and the
   **Modules** page shows each module's services and uses. The service change workflow is
   in docs/SDK.md.
+- Skiing: lift rides and runs are recognised. A **Runs & lifts** card compares them
+  (count, time, distance, vertical, vertical rate, speed, heart rate, longest run) and
+  lists every run and lift ride; click one to select it on the charts and map. The map
+  can colour the track by **Lifts / runs**, and the elevation chart shades them.
+- Ski touring: climbs and descents are recognised, with the same card (**Climbs &
+  descents**), map colouring and elevation shading. Summit breaks and transitions are
+  counted separately.
+- The summary tiles at the top of an activity now suit the sport (for example runs, ski
+  vertical and lift time for skiing, or power and TSS for cycling). **⚙ Customize** after
+  the tiles picks and orders them for each sport.
+- **Settings** sets how the map track is coloured when an activity opens (measure,
+  colour pattern, reversed). The controls on the map change only the open activity.
 
 ### Changed
 
 - **Gear** module: its services for importers (`ensure`, `assign`, `add_defaults`) are
   declared as version 1.0; **Strava import** declares that it uses them.
+- `python scripts/run.py` starts fit-push like the desktop app: in its own window with the
+  fit-push icon, opened as soon as the server is ready. Closing the window stops the
+  server, and stopping the server closes the window. `--no-desktop` runs only the server
+  as before.
+- A launcher brings up an already running fit-push only when it is the same installation;
+  next to another one (an installed release, another checkout) it starts on a free port
+  instead of just opening that one.
+
+### Fixed
+
+- Closing the fit-push window did not stop the server while a window of another fit-push
+  (for example the installed app) was open, and could close that other window too.
+- A trackpad pinch over a map zooms the map instead of the whole page.
 
 ## [0.4.0] - 2026-11-16
 

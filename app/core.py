@@ -13,7 +13,7 @@ import hashlib
 import re
 from datetime import UTC, datetime
 
-from . import sports, tutorial
+from . import ski, sports, tutorial
 from .analytics import ANALYSIS_VERSION, _prepare, activity_to_columns, analyse, point_count, window_columns
 from .events import EventBus
 from .laps import detect_laps, lap_report
@@ -23,6 +23,7 @@ from .storage import Store
 
 MAX_TAGS = 20
 TAG_RE = re.compile(r"[^\w\- ]+", re.UNICODE)
+PREFERENCE_DEFAULTS: dict = {"map_overlay": "none", "map_palette": "default", "map_reverse": False, "tiles": {}}
 
 
 class NotFound(LookupError):
@@ -73,6 +74,24 @@ class Core:
                 self.store.update(aid, summary=stored_summary(analyse(row["points"], row["sport"], settings)))
             self.events.emit("settings.changed", settings=settings)
         return settings
+
+    # ------------------------------------------------------------------ display preferences
+    def preferences(self) -> dict:
+        """Display defaults: map track colouring and palette, activity-page tiles per sport."""
+        return {**PREFERENCE_DEFAULTS, **self.store.get_preferences()}
+
+    def update_preferences(self, values: dict) -> dict:
+        """Merge ``values``; ``tiles`` merges per sport and ``{sport: None}`` restores that sport's defaults."""
+        values = {k: v for k, v in values.items() if k in PREFERENCE_DEFAULTS and v is not None}
+        if "tiles" in values:
+            tiles = dict(self.preferences()["tiles"])
+            for sport, keys in (values["tiles"] or {}).items():
+                if keys is None:
+                    tiles.pop(sport, None)
+                else:
+                    tiles[sport] = list(dict.fromkeys(keys))  # drop repeats, keep order
+            values["tiles"] = tiles
+        return {**PREFERENCE_DEFAULTS, **self.store.set_preferences(values)}
 
     def refresh_stale_summaries(self) -> int:
         """Recompute stored summaries made by an older analysis (once per ANALYSIS_VERSION).
@@ -225,12 +244,22 @@ class Core:
         result["window"] = window
         det = self.laps(row)
         result["laps"] = None if det is None else {k: det[k] for k in ("count", "start", "end", "lap_distance_m")}
+        result["ski"] = self._ski(cols, row["sport"], 0 if window is None else window["start"])
         result["segment_efforts"] = self.store.efforts_for_activity(activity_id)
         meta = {
             k: row[k]
             for k in ("id", "filename", "source_format", "device", "name", "sport", "start_time", "created_at", "tags")
         }
         return {**meta, **result}
+
+    def _ski(self, cols: dict, sport: str, offset: int) -> dict | None:
+        """Uphill/downhill legs (ski touring) or lifts/runs (skiing) of the analysed columns."""
+        res = ski.detect(cols, sport, self.settings())
+        if res is not None and offset:
+            for leg in res["legs"]:
+                leg["start"] += offset
+                leg["end"] += offset
+        return res
 
     # ------------------------------------------------------------------ laps
     def laps(self, row: dict) -> dict | None:

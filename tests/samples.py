@@ -103,6 +103,54 @@ def lap_track(laps=8, warmup=600.0, cooldown=400.0, lap_speeds=None, noise=2.5, 
     return pts
 
 
+def ski_track(cycles=3, vertical=400.0, touring=False, seed=3, start=START):
+    """Up/down cycles on a mountain: resort lifts and runs, or (``touring``) skinning and descents.
+
+    Each cycle: a wait at the bottom (lift queue / transition), the climb, a break at
+    the top, the descent (with a 15 m rise in the middle that must not split it).
+    Returns points like :func:`synthetic_track`; elevation has ±1.5 m noise.
+    """
+    import random
+
+    rnd = random.Random(seed)
+    up_speed, up_vs = (1.2, 0.18) if touring else (4.0, 2.0)  # horizontal m/s, vertical m/s
+    down_speed, down_vs = 9.0, 2.5
+    pts, t, x, y, ele, dist = [], 0, 0.0, 0.0, 1000.0, 0.0
+
+    def add(dx, dy, de, hr):
+        nonlocal t, x, y, ele, dist
+        x, y, ele = x + dx, y + dy, ele + de
+        dist += math.hypot(dx, dy)
+        pts.append(
+            {
+                "t": start + timedelta(seconds=t),
+                "lat": LAT0 + y / M_PER_DEG_LAT,
+                "lon": LON0 + x / (M_PER_DEG_LAT * math.cos(math.radians(LAT0))),
+                "ele": ele + rnd.uniform(-1.5, 1.5),
+                "hr": hr,
+                "cad": 0,
+                "power": None,
+                "dist": dist,
+            }
+        )
+        t += 1
+
+    for _ in range(cycles):
+        for _ in range(120):  # wait at the bottom
+            add(0, 0, 0, 95)
+        for _ in range(int(vertical / up_vs)):
+            add(0, up_speed, up_vs, 150 if touring else 100)
+        for _ in range(90):  # break at the top
+            add(0, 0, 0, 100)
+        steps, rise = int(vertical / down_vs), int(15 / down_vs)
+        for k in range(steps + 2 * rise):
+            rising = steps // 2 <= k < steps // 2 + rise
+            add(down_speed * math.sin(k / 15), -down_speed * 0.9, down_vs if rising else -down_vs, 140)
+    for _ in range(60):
+        add(0, 0, 0, 90)
+    return pts
+
+
 def to_gpx(pts, name="Morning Run", sport="running") -> bytes:
     rows = []
     for p in pts:
