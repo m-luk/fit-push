@@ -48,9 +48,11 @@ nothing else to install.
 - **macOS / Linux:** download `fit-push-<version>-<system>`, make it executable
   (`chmod +x`) and run it.
 
-Your browser opens fit-push; drop your activity files onto the page. A small window
-stays open while it runs: close it to stop fit-push. Starting it again while it runs just
-opens the browser.
+fit-push opens in its own window (an app window of Edge, Chrome or Brave; otherwise a
+browser tab); drop your activity files onto the page. Closing the fit-push window (or the
+small console window next to it) stops fit-push; on Windows you can pin the window to the
+taskbar to start fit-push from there. Starting it again while it runs just opens another
+fit-push window. `--no-app-window` opens a normal browser tab instead.
 
 ### From source
 

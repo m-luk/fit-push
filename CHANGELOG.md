@@ -8,6 +8,21 @@ How to update it: see "Changelog" in `AGENTS.md`.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-16
+
+### Added
+
+- The desktop app opens fit-push in its own window with the fit-push name and icon (app
+  mode of Edge, Chrome or Brave) instead of a browser tab; `--no-app-window` keeps the
+  tab. The window's title bar follows the light/dark theme. Closing the window stops
+  fit-push (`--no-stop-with-window` keeps it running). On Windows the window has its own
+  taskbar button, and pinning it gives a fit-push icon that starts fit-push again.
+- Developers can add a **fit-push (dev)** launcher to the Start menu / app menu with
+  `python scripts/devapp.py install`: it starts the working copy with auto-reload and
+  opens the browser, like the desktop app.
+- `python -m app --desktop` gives a run from source the desktop app's behaviour: open the
+  browser, reuse a running instance, fall back to a free port.
+
 ### Removed
 
 - Support for Python 3.10 and 3.11 when running from source: fit-push now needs Python
@@ -80,6 +95,7 @@ How to update it: see "Changelog" in `AGENTS.md`.
 - Pages and static files are served with `Cache-Control: no-cache`, so a normal refresh
   picks up a new version.
 
-[Unreleased]: https://github.com/m-luk/fit-push/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/m-luk/fit-push/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/m-luk/fit-push/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/m-luk/fit-push/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/m-luk/fit-push/releases/tag/v0.3.0

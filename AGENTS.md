@@ -33,6 +33,7 @@ reading `app/`; that keeps the context small and the core safe.
 python scripts/run.py                    # venv + deps, then serve http://127.0.0.1:8000 (core + modules)
 python scripts/run.py --core-only        # core only (any `python -m app` option passes through)
 python scripts/run.py --tests            # pytest: core (twice: core-only + all modules) + module tests
+python scripts/devapp.py install         # "fit-push (dev)" Start/app-menu launcher: this repo, --reload --desktop
 python scripts/modules.py check          # module rules + generated docs up to date
 python scripts/modules.py docs           # regenerate modules/INDEX.md + docs/MODULES_MANUAL.md
 ruff check . && ruff format --check .    # lint + format (config in pyproject.toml)
@@ -219,4 +220,8 @@ Use the **ui-development** skill for any change under `app/static/`, and the
 
 - Development on Windows with PowerShell 7 and Python from scoop; the venv
   interpreter is `.venv\Scripts\python.exe`.
+- CI type-checks on Linux, and ty checks for the platform it runs on. Guard OS-specific
+  code (`winreg`, `ctypes.windll`, `subprocess.DETACHED_PROCESS`, …) with a
+  `sys.platform == "win32"` check ty can narrow on, and run
+  `ty check --python-platform linux` after touching it on Windows.
 - Mixed LF/CRLF in the tree; when doing literal replacements from scripts, allow `\r\n`.

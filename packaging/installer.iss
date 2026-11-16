@@ -44,8 +44,9 @@ Type: filesandordirs; Name: "{app}\_internal"
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{autoprograms}\fit-push"; Filename: "{app}\fit-push.exe"
-Name: "{autodesktop}\fit-push"; Filename: "{app}\fit-push.exe"; Tasks: desktopicon
+; AppUserModelID matches the app window's (app/taskbar.py), so the window groups under a pin.
+Name: "{autoprograms}\fit-push"; Filename: "{app}\fit-push.exe"; AppUserModelID: "fit-push.app"
+Name: "{autodesktop}\fit-push"; Filename: "{app}\fit-push.exe"; AppUserModelID: "fit-push.app"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\fit-push.exe"; Description: "{cm:LaunchProgram,fit-push}"; Flags: nowait postinstall skipifsilent

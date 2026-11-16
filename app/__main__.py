@@ -10,7 +10,9 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import socket
+import subprocess
 import sys
 import threading
 import time
@@ -53,13 +55,114 @@ def free_port(host: str) -> int:
         return s.getsockname()[1]
 
 
-def _open_when_ready(host: str, port: int, url: str, wait: float = 60.0) -> None:
-    end = time.monotonic() + wait
+# Chromium-based browsers support app windows (`--app=URL`): no tabs or address bar, the
+# page's title and icon in the taskbar.
+_BROWSERS = {
+    "win32": {
+        "edge": [r"Microsoft\Edge\Application\msedge.exe"],
+        "chrome": [r"Google\Chrome\Application\chrome.exe"],
+        "brave": [r"BraveSoftware\Brave-Browser\Application\brave.exe"],
+    },
+    "darwin": {
+        "chrome": ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"],
+        "edge": ["/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge"],
+        "brave": ["/Applications/Brave Browser.app/Contents/MacOS/Brave Browser"],
+    },
+    "linux": {
+        "chrome": ["google-chrome", "google-chrome-stable"],
+        "chromium": ["chromium", "chromium-browser"],
+        "edge": ["microsoft-edge", "microsoft-edge-stable"],
+        "brave": ["brave-browser", "brave"],
+    },
+}
+
+
+_CHROMIUM_EXES = ("msedge.exe", "chrome.exe", "brave.exe", "chromium.exe", "vivaldi.exe")
+
+
+def _default_browser_windows() -> str | None:
+    """Executable of the user's default browser on Windows when it is Chromium-based."""
+    if sys.platform != "win32":
+        return None
+    try:
+        import shlex
+        import winreg
+
+        key = r"Software\Microsoft\Windows\Shell\Associations\UrlAssociations\https\UserChoice"
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key) as k:
+            prog = str(winreg.QueryValueEx(k, "ProgId")[0])
+        with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, prog + r"\shell\open\command") as k:
+            command = str(winreg.QueryValueEx(k, "")[0])
+        exe = shlex.split(command, posix=False)[0].strip('"')
+    except (ImportError, OSError, ValueError, IndexError):
+        return None
+    return exe if Path(exe).name.lower() in _CHROMIUM_EXES and Path(exe).is_file() else None
+
+
+def app_browser() -> str | None:
+    """Path of a Chromium-based browser that can open an app window (the default one first)."""
+    plat = "win32" if sys.platform == "win32" else "darwin" if sys.platform == "darwin" else "linux"
+    if plat == "win32" and (default := _default_browser_windows()):
+        return default
+    table = _BROWSERS[plat]
+    for name in table:
+        for entry in table[name]:
+            if plat == "win32":
+                roots = [os.environ.get(v) for v in ("PROGRAMFILES", "PROGRAMFILES(X86)", "LOCALAPPDATA")]
+                found = next((p for r in roots if r and (p := Path(r) / entry).is_file()), None)
+            elif plat == "darwin":
+                found = Path(entry) if Path(entry).is_file() else None
+            else:
+                found = shutil.which(entry)
+            if found:
+                return str(found)
+    return None
+
+
+def open_url(url: str, app_window: bool) -> bool:
+    """Open the app in its own browser window (fit-push name and icon), else in a browser tab.
+
+    Returns True when an app window was opened.
+    """
+    if app_window and (exe := app_browser()):
+        # Detached from our console: stopping the server with a console Ctrl+C must not reach the browser.
+        flags = (subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP) if sys.platform == "win32" else 0
+        try:
+            subprocess.Popen(
+                [exe, f"--app={url}"],
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=sys.platform != "win32",
+                creationflags=flags,
+            )
+            return True
+        except OSError:
+            pass
+    webbrowser.open(url)
+    return False
+
+
+def _open_when_ready(host: str, port: int, url: str, app_window: bool, stop_with_window: bool) -> None:
+    from . import taskbar
+
+    end = time.monotonic() + 60.0
     while time.monotonic() < end:
         if running_instance(host, port, timeout=0.5):
-            webbrowser.open(url)
+            if open_url(url, app_window):
+                # own taskbar button + pin that relaunches fit-push; stop when the last window closes
+                watched = stop_with_window and taskbar.watch_app_windows(_stopped_with_window)
+                if not watched:
+                    taskbar.tag_app_windows()
             return
         time.sleep(0.25)
+
+
+def _stopped_with_window() -> None:
+    from . import taskbar
+
+    print("fit-push window closed: stopping the server", flush=True)
+    taskbar.stop_server()
 
 
 def parser() -> argparse.ArgumentParser:
@@ -76,6 +179,25 @@ def parser() -> argparse.ArgumentParser:
         default=None,
         help="open the browser when the server is ready (default: on in the desktop app)",
     )
+    ap.add_argument(
+        "--desktop",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="behave like the desktop app: open the browser, reuse a running instance, "
+        "pick a free port if the default is taken (default: on in the desktop app)",
+    )
+    ap.add_argument(
+        "--app-window",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="open fit-push in its own window (Edge, Chrome or Brave app mode) instead of a browser tab",
+    )
+    ap.add_argument(
+        "--stop-with-window",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="stop the server when the last fit-push app window is closed (Windows)",
+    )
     ap.add_argument("--data-dir", help=f"data directory (default: {paths.default_data_dir()})")
     ap.add_argument("--db", help="database file (default: <data dir>/activities.db)")
     mods = ap.add_mutually_exclusive_group()
@@ -89,9 +211,9 @@ def parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
-    desktop = frozen()
+    desktop = frozen() if args.desktop is None else args.desktop
     open_browser = desktop if args.open is None else args.open
-    if args.reload and desktop:
+    if args.reload and frozen():
         print("--reload is only available when running from source", file=sys.stderr)
         return 2
 
@@ -122,8 +244,10 @@ def main(argv: list[str] | None = None) -> int:
         # Double-clicking the app again just brings the running one up.
         if running_instance(host, port):
             print(f"fit-push is already running at http://{host}:{port}")
-            if open_browser:
-                webbrowser.open(f"http://{host}:{port}/")
+            if open_browser and open_url(f"http://{host}:{port}/", args.app_window):
+                from . import taskbar
+
+                taskbar.tag_app_windows()  # the running server's watcher counts this window too
             return 0
         if not port_free(host, port):
             port = free_port(host)
@@ -134,7 +258,9 @@ def main(argv: list[str] | None = None) -> int:
     print(f"database: {db}")
     print(f"fit-push {__version__} running at {url}" + ("  (close this window to stop)" if desktop else ""))
     if open_browser:
-        threading.Thread(target=_open_when_ready, args=(host, port, url), daemon=True).start()
+        threading.Thread(
+            target=_open_when_ready, args=(host, port, url, args.app_window, args.stop_with_window), daemon=True
+        ).start()
 
     import uvicorn
 

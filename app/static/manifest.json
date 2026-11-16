@@ -1,0 +1,11 @@
+{
+  "name": "fit-push",
+  "short_name": "fit-push",
+  "description": "Activity analytics for FIT, GPX and TCX files",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f4f4f2",
+  "theme_color": "#fcfcfb",
+  "icons": [{ "src": "/static/logo.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}

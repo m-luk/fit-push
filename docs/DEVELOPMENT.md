@@ -19,6 +19,24 @@ python scripts/run.py --tests                # install dev requirements, run pyt
 In VS Code, **Terminal → Run Build Task** (Ctrl+Shift+B) runs `fit-push: run`;
 there are also *run (auto-reload)*, *run (core only)*, *tests* and *lint + types*.
 
+### Editable install (app launcher for this checkout)
+
+To start your working copy like an installed app, add a **fit-push (dev)** launcher:
+
+```bash
+python scripts/devapp.py install               # Start menu (Windows), app menu (Linux), ~/Applications (macOS)
+python scripts/devapp.py install --core-only   # extra options are baked into the launcher
+python scripts/devapp.py uninstall
+```
+
+The launcher runs this repository with `--reload` and `--desktop` in a console window:
+it opens fit-push in its own app window, brings up an instance that is already running instead of starting
+a second one, and picks a free port when 8000 is taken. Python changes restart the
+server; for JS/CSS just refresh the browser. It uses your normal data directory (with
+the usual backup on every start), so it sits next to an installed release without a
+clash; re-run `install` after moving the repo. The logo is used as the icon when Pillow
+is in `.venv` (`pip install pillow`).
+
 Manual setup: `python -m venv .venv`, activate it, `pip install -r requirements.txt`,
 `python -m app` (see `python -m app --help`).
 
@@ -45,7 +63,16 @@ binary FIT files, so the tests need no fixture files.
 The desktop app is the normal app frozen with [PyInstaller](https://pyinstaller.org) (Python
 included), started by `packaging/launcher.py`, which runs `python -m app` with desktop
 defaults: open the browser, reuse a running instance (`GET /api/version`), fall back to a
-free port when 8000 is taken, keep the window open on a start-up error.
+free port when 8000 is taken, keep the window open on a start-up error. The browser is
+opened as an app window (`--app=URL` of the default browser if it is Chromium-based, else
+Edge/Chrome/Brave/Chromium; `--no-app-window` for a tab), which takes its name and icon
+from the page title and `app/static/manifest.json`. On Windows `app/taskbar.py` finds that
+window (a Chromium window titled exactly `fit-push`, the page `<title>`) and sets its
+AppUserModel ID and relaunch properties: it gets its own taskbar button, and a pin shows the
+fit-push icon and runs the launcher (`fit-push.exe`, or `devapp.py launch` from source)
+instead of the browser. The server watches those windows and, once the last one has been
+closed for a few seconds, stops itself like Ctrl+C in its console (`--no-stop-with-window`
+keeps it running).
 
 ```bash
 pip install -r requirements-release.txt   # PyInstaller + Pillow (for the icon)

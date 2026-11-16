@@ -75,7 +75,107 @@ def test_cli_parses_desktop_options():
     assert args.port == 9000
     assert args.core_only
     assert launcher.parser().parse_args([]).open is None
+    assert launcher.parser().parse_args([]).desktop is None
+    assert launcher.parser().parse_args(["--desktop"]).desktop is True
     assert not launcher.frozen()
+
+
+def test_desktop_mode_from_source_reuses_running_instance(monkeypatch, tmp_path):
+    opened: list[tuple[str, bool]] = []
+    monkeypatch.setattr(launcher, "running_instance", lambda host, port, timeout=1.0: __version__)
+    monkeypatch.setattr(launcher, "open_url", lambda url, app_window: opened.append((url, app_window)))
+    monkeypatch.setenv("FITPUSH_DB", str(tmp_path / "x.db"))
+    assert launcher.main(["--desktop", "--reload"]) == 0
+    assert launcher.main(["--desktop", "--no-app-window"]) == 0
+    assert opened == [("http://127.0.0.1:8000/", True), ("http://127.0.0.1:8000/", False)]
+    assert not (tmp_path / "backups").exists()  # returned before backing up / serving
+
+
+def test_open_url_uses_app_window_or_falls_back_to_a_tab(monkeypatch):
+    tabs: list[str] = []
+    started: list[list[str]] = []
+    monkeypatch.setattr(launcher.webbrowser, "open", tabs.append)
+    monkeypatch.setattr(launcher.subprocess, "Popen", lambda cmd, **kw: started.append(cmd))
+    monkeypatch.setattr(launcher, "app_browser", lambda: "/x/chrome")
+    assert launcher.open_url("http://h:1/", app_window=True) is True
+    assert started == [["/x/chrome", "--app=http://h:1/"]] and not tabs
+    assert launcher.open_url("http://h:1/", app_window=False) is False
+    monkeypatch.setattr(launcher, "app_browser", lambda: None)
+    assert launcher.open_url("http://h:1/", app_window=True) is False
+    assert tabs == ["http://h:1/", "http://h:1/"] and len(started) == 1
+
+
+def _fake_clock(monkeypatch, step: float = 0.5):
+    from app import taskbar
+
+    now = [0.0]
+    monkeypatch.setattr(taskbar.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(taskbar.time, "sleep", lambda s: now.__setitem__(0, now[0] + step))
+    return taskbar
+
+
+def test_window_watcher_stops_after_the_last_window_closes(monkeypatch):
+    taskbar = _fake_clock(monkeypatch)
+    frames = iter([[], [7], [7, 8], [8], [], [9]] + [[]] * 100)  # a reload blip ([] then [9]) is not a close
+    monkeypatch.setattr(taskbar, "_app_windows", lambda: next(frames))
+    tagged: list[int] = []
+    monkeypatch.setattr(taskbar, "_set_identity", lambda hwnd, ident: tagged.append(hwnd))
+    closed: list[bool] = []
+    ident = taskbar.Identity("fit-push.dev", "cmd", "fit-push (dev)", None)
+    taskbar._watch_loop(ident, lambda: closed.append(True), grace=4.0, appear=60.0)
+    assert closed == [True]
+    assert tagged == [7, 8, 9]  # every new window once
+
+
+def test_window_watcher_does_nothing_when_no_window_appears(monkeypatch):
+    taskbar = _fake_clock(monkeypatch)
+    monkeypatch.setattr(taskbar, "_app_windows", list)
+    closed: list[bool] = []
+    taskbar._watch_loop(None, lambda: closed.append(True), grace=4.0, appear=10.0)
+    assert closed == []
+
+
+def test_taskbar_identity_from_source(monkeypatch):
+    from app import taskbar
+
+    monkeypatch.setenv("FITPUSH_RELAUNCH", "py devapp.py launch --core-only")
+    ident = taskbar.identity()
+    assert ident and ident.app_id == "fit-push.dev" and ident.command == "py devapp.py launch --core-only"
+    monkeypatch.delenv("FITPUSH_RELAUNCH")
+    ident = taskbar.identity()
+    assert ident and ident.command.endswith("devapp.py launch")
+
+
+def test_manifest_is_served(client):
+    r = client.get("/static/manifest.json")
+    assert r.status_code == 200
+    assert r.json()["name"] == "fit-push"
+    assert 'rel="manifest"' in client.get("/").text
+
+
+def _devapp():
+    spec = importlib.util.spec_from_file_location("devapp", ROOT / "scripts" / "devapp.py")
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def test_devapp_install_and_uninstall_linux_entry(monkeypatch, tmp_path):
+    dev = _devapp()
+    monkeypatch.setattr(dev.sys, "platform", "linux")
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    monkeypatch.setattr(dev, "ensure_venv", lambda: Path("/venv/bin/python"))
+    monkeypatch.setattr(dev, "ensure_requirements", lambda py, dev: None)
+    monkeypatch.setattr(dev, "make_icon", lambda py: None)
+    assert dev.main(["install", "--core-only"]) == 0
+    entry = tmp_path / "applications" / "fit-push-dev.desktop"
+    text = entry.read_text(encoding="utf-8")
+    assert "Name=fit-push (dev)" in text
+    assert "devapp.py" in text and " launch --core-only" in text
+    assert "Terminal=true" in text
+    assert dev.main(["uninstall"]) == 0
+    assert not entry.exists()
 
 
 LOG = """# Changelog
