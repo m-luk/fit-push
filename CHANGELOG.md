@@ -23,8 +23,20 @@ How to update it: see "Changelog" in `AGENTS.md`.
 - **Settings** sets how the map track is coloured when an activity opens (measure,
   colour pattern, reversed). The controls on the map change only the open activity.
 
+### Changed
+
+- `python scripts/run.py` starts fit-push like the desktop app: in its own window with the
+  fit-push icon, opened as soon as the server is ready. Closing the window stops the
+  server, and stopping the server closes the window. `--no-desktop` runs only the server
+  as before.
+- A launcher brings up an already running fit-push only when it is the same installation;
+  next to another one (an installed release, another checkout) it starts on a free port
+  instead of just opening that one.
+
 ### Fixed
 
+- Closing the fit-push window did not stop the server while a window of another fit-push
+  (for example the installed app) was open, and could close that other window too.
 - A trackpad pinch over a map zooms the map instead of the whole page.
 
 ## [0.4.0] - 2026-11-16

@@ -30,14 +30,22 @@ def frozen() -> bool:
     return bool(getattr(sys, "frozen", False))
 
 
-def running_instance(host: str, port: int, timeout: float = 1.0) -> str | None:
-    """Version of a fit-push already serving on host:port, else None."""
+def running_instance(host: str, port: int, timeout: float = 1.0, same_installation: bool = False) -> str | None:
+    """Version of a fit-push already serving on host:port, else None.
+
+    With ``same_installation`` only a server of this installation counts (the same desktop
+    executable or source checkout, see ``paths.instance``), never another one on that port.
+    """
     try:
         with urllib.request.urlopen(f"http://{host}:{port}/api/version", timeout=timeout) as r:
             info = json.loads(r.read().decode("utf-8"))
     except (OSError, ValueError):
         return None
-    return info.get("version") if isinstance(info, dict) and info.get("app") == "fit-push" else None
+    if not isinstance(info, dict) or info.get("app") != "fit-push":
+        return None
+    if same_installation and info.get("instance") != paths.instance():
+        return None
+    return info.get("version")
 
 
 def port_free(host: str, port: int) -> bool:
@@ -149,11 +157,12 @@ def _open_when_ready(host: str, port: int, url: str, app_window: bool, stop_with
     end = time.monotonic() + 60.0
     while time.monotonic() < end:
         if running_instance(host, port, timeout=0.5):
+            others = taskbar.app_windows()  # other fit-push servers' windows: not ours to watch or close
             if open_url(url, app_window):
                 # own taskbar button + pin that relaunches fit-push; stop when the last window closes
-                watched = stop_with_window and taskbar.watch_app_windows(_stopped_with_window)
+                watched = stop_with_window and taskbar.watch_app_windows(_stopped_with_window, ignore=others)
                 if not watched:
-                    taskbar.tag_app_windows()
+                    taskbar.tag_app_windows(ignore=others)
             return
         time.sleep(0.25)
 
@@ -241,13 +250,14 @@ def main(argv: list[str] | None = None) -> int:
 
     host, port = args.host, args.port or DEFAULT_PORT
     if desktop and args.port is None:
-        # Double-clicking the app again just brings the running one up.
-        if running_instance(host, port):
+        # Double-clicking the app again just brings the running one up (not another installation's).
+        if running_instance(host, port, same_installation=True):
             print(f"fit-push is already running at http://{host}:{port}")
-            if open_browser and open_url(f"http://{host}:{port}/", args.app_window):
-                from . import taskbar
+            from . import taskbar
 
-                taskbar.tag_app_windows()  # the running server's watcher counts this window too
+            others = taskbar.app_windows()
+            if open_browser and open_url(f"http://{host}:{port}/", args.app_window):
+                taskbar.tag_app_windows(ignore=others)  # the running server's watcher counts this window too
             return 0
         if not port_free(host, port):
             port = free_port(host)
@@ -257,19 +267,30 @@ def main(argv: list[str] | None = None) -> int:
     url = f"http://{host}:{port}/"
     print(f"database: {db}")
     print(f"fit-push {__version__} running at {url}" + ("  (close this window to stop)" if desktop else ""))
+    windowed = open_browser and args.app_window
     if open_browser:
         threading.Thread(
             target=_open_when_ready, args=(host, port, url, args.app_window, args.stop_with_window), daemon=True
         ).start()
+    if windowed:
+        from . import taskbar
+
+        taskbar.close_windows_on_console_close()  # closing the console window closes the app window too
 
     import uvicorn
 
-    if args.reload:
-        uvicorn.run("app.main:create_app", factory=True, host=host, port=port, reload=True)
-    else:
-        from .main import create_app
+    try:
+        if args.reload:
+            uvicorn.run("app.main:create_app", factory=True, host=host, port=port, reload=True)
+        else:
+            from .main import create_app
 
-        uvicorn.run(create_app, factory=True, host=host, port=port)
+            uvicorn.run(create_app, factory=True, host=host, port=port)
+    finally:
+        if windowed:  # the server stopped (Ctrl+C, error): its window would only show errors now
+            from . import taskbar
+
+            taskbar.close_app_windows()
     return 0
 
 
