@@ -8,6 +8,21 @@ How to update it: see "Changelog" in `AGENTS.md`.
 
 ## [Unreleased]
 
+### Added
+
+- Skiing: lift rides and runs are recognised. A **Runs & lifts** card compares them
+  (count, time, distance, vertical, vertical rate, speed, heart rate, longest run) and
+  lists every run and lift ride; click one to select it on the charts and map. The map
+  can colour the track by **Lifts / runs**, and the elevation chart shades them.
+- Ski touring: climbs and descents are recognised, with the same card (**Climbs &
+  descents**), map colouring and elevation shading. Summit breaks and transitions are
+  counted separately.
+- The summary tiles at the top of an activity now suit the sport (for example runs, ski
+  vertical and lift time for skiing, or power and TSS for cycling). **⚙ Customize** after
+  the tiles picks and orders them for each sport.
+- **Settings** sets how the map track is coloured when an activity opens (measure,
+  colour pattern, reversed). The controls on the map change only the open activity.
+
 ### Changed
 
 - `python scripts/run.py` starts fit-push like the desktop app: in its own window with the
@@ -22,6 +37,7 @@ How to update it: see "Changelog" in `AGENTS.md`.
 
 - Closing the fit-push window did not stop the server while a window of another fit-push
   (for example the installed app) was open, and could close that other window too.
+- A trackpad pinch over a map zooms the map instead of the whole page.
 
 ## [0.4.0] - 2026-11-16
 

@@ -59,11 +59,18 @@
 
   <dialog id="settings-dialog">
     <form method="dialog" id="settings-form">
-      <h2>Athlete settings</h2>
+      <h2>Settings</h2>
+      <h3>Athlete</h3>
       <p class="muted">Used for heart-rate zones, TRIMP, intensity factor and TSS.</p>
       <label>Max heart rate <input type="number" name="max_hr" min="100" max="250" required> bpm</label>
       <label>Resting heart rate <input type="number" name="rest_hr" min="25" max="120" required> bpm</label>
       <label>FTP <input type="number" name="ftp" min="50" max="600" required> W</label>
+      <h3>Map on activity pages</h3>
+      <p class="muted">What the track starts with when you open an activity. The controls on the map change only the activity you are looking at.</p>
+      <label>Colour track by <select name="map_overlay" id="pref-overlay"></select></label>
+      <label>Colours <select name="map_palette" id="pref-palette"></select></label>
+      <label>Reverse colours <input type="checkbox" name="map_reverse"></label>
+      <p class="muted small-note">Summary tiles: use <b>⚙ Customize</b> after the tiles on an activity page. You choose them once for each sport.</p>
       <div class="dialog-actions">
         <button value="cancel" class="btn ghost" formnovalidate>Cancel</button>
         <button value="save" class="btn primary">Save</button>
@@ -79,6 +86,19 @@
       <div class="dialog-actions">
         <button value="cancel" class="btn ghost" formnovalidate>Cancel</button>
         <button value="ok" class="btn primary" id="name-ok">Create</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="tiles-dialog" class="wide">
+    <form method="dialog" id="tiles-form">
+      <h2 id="tiles-title">Summary tiles</h2>
+      <p class="muted">Tick the tiles to show at the top of every <b id="tiles-sport"></b> activity and use ↑ ↓ to order them. A tile without data in an activity is left out.</p>
+      <ul class="tile-pick" id="tile-pick"></ul>
+      <div class="dialog-actions">
+        <button value="reset" class="btn ghost push-left" formnovalidate>Reset to defaults</button>
+        <button value="cancel" class="btn ghost" formnovalidate>Cancel</button>
+        <button value="save" class="btn primary">Save</button>
       </div>
     </form>
   </dialog>

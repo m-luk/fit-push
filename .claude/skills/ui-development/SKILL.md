@@ -43,8 +43,11 @@ register cleanups so navigation frees maps and charts.
   `start`, `end` (trimmed view, absolute cleaned indices), `laps=1`, `effort={id}`;
   `#/segments`, `#/segment/{id}`. Anything a user may want to bookmark or link
   to belongs in the hash; parse it in `route()` and pass it via `opts`.
-- `localStorage` (`lsGet/lsSet`, prefix `fitpush:`) only for per-viewer
-  preferences: units, theme, x-axis mode, overlay, palette. Never for data.
+- `localStorage` (`lsGet/lsSet`, prefix `fitpush:`) only for small per-viewer
+  conveniences: units, theme, x-axis mode. Never for data. Defaults that must
+  survive a restart (map colouring, tiles per sport) live in `state.prefs`
+  (`GET/PUT /api/preferences`, `savePrefs()`), because the desktop app's origin
+  can change between starts.
 - A `render*` function owns `main.innerHTML` completely: build the markup
   string, assign once, then attach listeners. Call `destroyCharts()` and
   `disposeMap()` (or `leaveActivity()`) first so Chart.js instances and the

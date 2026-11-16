@@ -20,6 +20,70 @@ SKI_EFFORTS = [1000, 5000, 10000, 20000]
 WATER_EFFORTS = [500, 1000, 5000, 10000]
 SWIM_EFFORTS = [100, 400, 1000, 1500]
 
+# Default summary tiles on the activity page, in order (keys of the tile catalogue in
+# app.js; ``avg_speed`` shows pace for pace sports). Tiles without data are skipped;
+# users can choose their own per sport (preferences ``tiles``).
+GENERIC_TILES = [
+    "distance",
+    "moving",
+    "elapsed",
+    "avg_speed",
+    "max_speed",
+    "elev_gain",
+    "avg_hr",
+    "max_hr",
+    "avg_power",
+    "normalized_power",
+    "intensity_factor",
+    "tss",
+    "work",
+    "trimp",
+    "avg_cadence",
+    "avg_temp",
+]
+RUN_TILES = ["distance", "moving", "avg_speed", "elev_gain", "avg_hr", "max_hr", "avg_cadence", "trimp", "elapsed"]
+RIDE_TILES = [
+    "distance",
+    "moving",
+    "avg_speed",
+    "max_speed",
+    "elev_gain",
+    "avg_power",
+    "normalized_power",
+    "tss",
+    "avg_hr",
+    "avg_cadence",
+    "work",
+    "elapsed",
+]
+MTB_TILES = ["distance", "moving", "avg_speed", "max_speed", "elev_gain", "elev_loss", "avg_hr", "avg_power", "elapsed"]
+FOOT_TILES = ["distance", "moving", "elapsed", "avg_speed", "elev_gain", "elev_loss", "ele_max", "avg_hr"]
+SKI_TILES = [
+    "down_count",
+    "down_vertical",
+    "down_distance",
+    "max_speed",
+    "down_time",
+    "up_time",
+    "ele_max",
+    "avg_hr",
+    "elapsed",
+]
+TOUR_TILES = [
+    "distance",
+    "elapsed",
+    "elev_gain",
+    "up_time",
+    "up_rate",
+    "down_time",
+    "ele_max",
+    "avg_hr",
+    "max_speed",
+    "trimp",
+]
+WATER_TILES = ["distance", "moving", "elapsed", "avg_speed", "max_speed", "avg_hr", "avg_temp"]
+SWIM_TILES = ["distance", "moving", "elapsed", "avg_speed", "avg_hr", "avg_cadence"]
+
 
 @dataclass(frozen=True)
 class Sport:
@@ -33,12 +97,15 @@ class Sport:
     cadence_unit: str = "spm"
     tcx: str = "Other"  # TCX Activity/@Sport
     fit: tuple[int, int] = (0, 0)  # FIT (sport, sub_sport)
+    tiles: list = field(default_factory=lambda: GENERIC_TILES)  # default activity-page tiles
 
 
 SPORTS: dict[str, Sport] = {
     s.key: s
     for s in [
-        Sport("running", "Running", "🏃", "running", pace=True, moving_ms=0.6, tcx="Running", fit=(1, 0)),
+        Sport(
+            "running", "Running", "🏃", "running", pace=True, moving_ms=0.6, tcx="Running", fit=(1, 0), tiles=RUN_TILES
+        ),
         Sport(
             "cycling",
             "Cycling",
@@ -49,6 +116,7 @@ SPORTS: dict[str, Sport] = {
             cadence_unit="rpm",
             tcx="Biking",
             fit=(2, 0),
+            tiles=RIDE_TILES,
         ),
         Sport(
             "road_cycling",
@@ -60,6 +128,7 @@ SPORTS: dict[str, Sport] = {
             cadence_unit="rpm",
             tcx="Biking",
             fit=(2, 7),
+            tiles=RIDE_TILES,
         ),
         Sport(
             "gravel_cycling",
@@ -71,6 +140,7 @@ SPORTS: dict[str, Sport] = {
             cadence_unit="rpm",
             tcx="Biking",
             fit=(2, 46),
+            tiles=RIDE_TILES,
         ),
         Sport(
             "mountain_biking",
@@ -82,16 +152,66 @@ SPORTS: dict[str, Sport] = {
             cadence_unit="rpm",
             tcx="Biking",
             fit=(2, 8),
+            tiles=MTB_TILES,
         ),
-        Sport("walking", "Walking", "🚶", "foot", pace=True, moving_ms=0.3, efforts=FOOT_EFFORTS, fit=(11, 0)),
-        Sport("hiking", "Hiking", "🥾", "foot", pace=True, moving_ms=0.3, efforts=FOOT_EFFORTS, fit=(17, 0)),
-        Sport("skiing", "Skiing", "⛷️", "skiing", moving_ms=1.0, efforts=SKI_EFFORTS, fit=(13, 38)),
-        Sport("ski_touring", "Ski touring", "🎿", "skiing", moving_ms=0.3, efforts=SKI_EFFORTS, fit=(13, 37)),
-        Sport("sailing", "Sailing", "⛵", "water", moving_ms=0.3, efforts=WATER_EFFORTS, fit=(32, 0)),
         Sport(
-            "kayaking", "Kayaking", "🛶", "water", moving_ms=0.3, efforts=WATER_EFFORTS, cadence_unit="spm", fit=(41, 0)
+            "walking",
+            "Walking",
+            "🚶",
+            "foot",
+            pace=True,
+            moving_ms=0.3,
+            efforts=FOOT_EFFORTS,
+            fit=(11, 0),
+            tiles=FOOT_TILES,
         ),
-        Sport("swimming", "Swimming", "🏊", "swimming", pace=True, moving_ms=0.2, efforts=SWIM_EFFORTS, fit=(5, 0)),
+        Sport(
+            "hiking",
+            "Hiking",
+            "🥾",
+            "foot",
+            pace=True,
+            moving_ms=0.3,
+            efforts=FOOT_EFFORTS,
+            fit=(17, 0),
+            tiles=FOOT_TILES,
+        ),
+        Sport("skiing", "Skiing", "⛷️", "skiing", moving_ms=1.0, efforts=SKI_EFFORTS, fit=(13, 38), tiles=SKI_TILES),
+        Sport(
+            "ski_touring",
+            "Ski touring",
+            "🎿",
+            "skiing",
+            moving_ms=0.3,
+            efforts=SKI_EFFORTS,
+            fit=(13, 37),
+            tiles=TOUR_TILES,
+        ),
+        Sport(
+            "sailing", "Sailing", "⛵", "water", moving_ms=0.3, efforts=WATER_EFFORTS, fit=(32, 0), tiles=WATER_TILES
+        ),
+        Sport(
+            "kayaking",
+            "Kayaking",
+            "🛶",
+            "water",
+            moving_ms=0.3,
+            efforts=WATER_EFFORTS,
+            cadence_unit="spm",
+            fit=(41, 0),
+            tiles=WATER_TILES,
+        ),
+        Sport(
+            "swimming",
+            "Swimming",
+            "🏊",
+            "swimming",
+            pace=True,
+            moving_ms=0.2,
+            efforts=SWIM_EFFORTS,
+            fit=(5, 0),
+            tiles=SWIM_TILES,
+        ),
         Sport("unknown", "Other", "⏱️", "other"),
     ]
 }

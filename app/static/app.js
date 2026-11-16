@@ -3,6 +3,7 @@
   "use strict";
 
   // ------------------------------------------------------------------ state & utils
+  const PREF_DEFAULTS = { map_overlay: "none", map_palette: "default", map_reverse: false, tiles: {} };
   const state = {
     units: lsGet("units") || "metric",
     activities: [],
@@ -12,9 +13,14 @@
     current: null,
     period: "week",
     metric: "distance_m",
-    overlay: lsGet("overlay") || "none",
-    palette: lsGet("palette") || "default",
-    paletteReverse: lsGet("paletteReverse") === "1",
+    // Map track colouring of the open activity; every activity starts with the defaults
+    // from Settings (state.prefs), the map controls change only the current view.
+    overlay: "none",
+    palette: "default",
+    paletteReverse: false,
+    mapFor: null,     // activity id the map colouring above belongs to
+    prefs: { ...PREF_DEFAULTS }, // GET /api/preferences
+    legBands: null,   // ski legs shaded on the elevation chart [{i0, i1, up}] (series positions)
     selListeners: [], // called after every selection change (laps view, segments card)
     effort: null,     // selected segment effort {id, name, range}
     segments: [],
@@ -75,6 +81,12 @@
       keys.length === 1 ? opt(keys[0]) : `<optgroup label="${esc(FAMILY_LABEL[fam] || fam)}">${keys.map(opt).join("")}</optgroup>`).join("");
   }
   async function loadSports() { SPORTS = new Map((await api("/api/sports")).map((x) => [x.key, x])); }
+  async function loadPrefs() {
+    try { state.prefs = { ...PREF_DEFAULTS, ...(await api("/api/preferences")) }; } catch { state.prefs = { ...PREF_DEFAULTS }; }
+  }
+  async function savePrefs(values) {
+    state.prefs = { ...PREF_DEFAULTS, ...(await api("/api/preferences", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(values) })) };
+  }
   const UNITS = {
     metric: { dist: 1000, distL: "km", speed: 3.6, speedL: "km/h", ele: 1, eleL: "m", split: "km" },
     imperial: { dist: 1609.344, distL: "mi", speed: 2.23694, speedL: "mph", ele: 3.28084, eleL: "ft", split: "mi" },
@@ -157,19 +169,32 @@
   });
 
   // ------------------------------------------------------------------ settings
+  const ATHLETE_KEYS = ["max_hr", "rest_hr", "ftp"];
+  // Track colourings a default can name; an activity without that data starts with the plain route.
+  const OVERLAY_CHOICES = [["none", "Nothing (route only)"], ["speed", "Speed / pace"], ["elevation", "Elevation"], ["hr", "Heart rate"],
+    ["power", "Power"], ["delta", "Speed Δ vs average"], ["phase", "Uphill / downhill (skiing)"]];
+  let athleteBefore = null;
   $("#settings-btn").addEventListener("click", async () => {
-    const s = await api("/api/settings");
-    const f = $("#settings-form");
-    for (const k of ["max_hr", "rest_hr", "ftp"]) f.elements[k].value = s[k];
+    const [s] = await Promise.all([api("/api/settings"), loadPrefs()]);
+    const f = $("#settings-form"), p = state.prefs;
+    for (const k of ATHLETE_KEYS) f.elements[k].value = s[k];
+    athleteBefore = Object.fromEntries(ATHLETE_KEYS.map((k) => [k, Number(s[k])]));
+    $("#pref-overlay").innerHTML = OVERLAY_CHOICES.map(([k, l]) => `<option value="${k}" ${k === p.map_overlay ? "selected" : ""}>${esc(l)}</option>`).join("");
+    $("#pref-palette").innerHTML = Object.entries(PALETTES).map(([k, x]) => `<option value="${k}" ${k === p.map_palette ? "selected" : ""}>${esc(x.label)}</option>`).join("");
+    f.elements.map_reverse.checked = !!p.map_reverse;
     $("#settings-dialog").showModal();
   });
   $("#settings-dialog").addEventListener("close", async () => {
     if ($("#settings-dialog").returnValue !== "save") return;
     const f = $("#settings-form");
-    const body = Object.fromEntries(["max_hr", "rest_hr", "ftp"].map((k) => [k, Number(f.elements[k].value)]));
+    const body = Object.fromEntries(ATHLETE_KEYS.map((k) => [k, Number(f.elements[k].value)]));
+    const athleteChanged = ATHLETE_KEYS.some((k) => body[k] !== athleteBefore?.[k]);
     try {
-      await api("/api/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-      toast("Settings saved — analytics recalculated");
+      await savePrefs({ map_overlay: f.elements.map_overlay.value, map_palette: f.elements.map_palette.value, map_reverse: f.elements.map_reverse.checked });
+      // Athlete values change stored summaries (zones, TSS, TRIMP): only recompute when they changed.
+      if (athleteChanged) await api("/api/settings", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      toast(athleteChanged ? "Settings saved — analytics recalculated" : "Settings saved");
+      state.mapFor = null; // the open activity picks up the new map defaults
       await loadList(); route();
     } catch (e) { toast("Could not save: " + e.message); }
   });
@@ -220,9 +245,23 @@
   const crosshair = {
     id: "crosshair",
     beforeDatasetsDraw(chart) {
+      const ds = chart.data.datasets[0];
+      // Ski legs as light bands on the elevation chart (amber up, blue down).
+      if (state.legBands && chart.$synced && chart.$def?.key === "elevation") {
+        const { ctx, chartArea, scales } = chart;
+        ctx.save();
+        for (const b of state.legBands) {
+          if (!ds.data[b.i0] || !ds.data[b.i1]) continue;
+          const x0 = Math.max(chartArea.left, scales.x.getPixelForValue(ds.data[b.i0].x));
+          const x1 = Math.min(chartArea.right, scales.x.getPixelForValue(ds.data[b.i1].x));
+          if (x1 <= x0) continue;
+          ctx.fillStyle = css(b.up ? LEG_COLOR.up : LEG_COLOR.down) + "2e";
+          ctx.fillRect(x0, chartArea.top, x1 - x0, chartArea.bottom - chartArea.top);
+        }
+        ctx.restore();
+      }
       // Shade the drag selection (shared across all synced charts).
       const sel = state.sel;
-      const ds = chart.data.datasets[0];
       if (!sel || !chart.$synced || !ds.data[sel.i0] || !ds.data[sel.i1]) return;
       const { ctx, chartArea, scales } = chart;
       const x0 = Math.max(chartArea.left, scales.x.getPixelForValue(ds.data[sel.i0].x));
@@ -440,6 +479,111 @@
     } catch (e) { toast("Could not save: " + e.message); }
   }
 
+  // Map colouring an activity opens with: the defaults from Settings (plain ones on the tour's run,
+  // so its "colour the track" steps start from the route).
+  function applyMapDefaults(id) {
+    const p = tour.on && id === tour.id ? PREF_DEFAULTS : state.prefs;
+    state.mapFor = id;
+    state.overlay = p.map_overlay || "none";
+    state.palette = PALETTES[p.map_palette] ? p.map_palette : "default";
+    state.paletteReverse = !!p.map_reverse;
+  }
+
+  // Words for the uphill/downhill legs of ski activities (see app/ski.py).
+  function skiWords(a) {
+    const touring = a.ski ? a.ski.mode === "touring" : a.sport === "ski_touring";
+    return touring
+      ? { up: "Climbs", upOne: "Climb", down: "Descents", downOne: "Descent", card: "Climbs & descents", other: "Breaks & transitions" }
+      : { up: "Lift rides", upOne: "Lift", down: "Runs", downOne: "Run", card: "Runs & lifts", other: "Waiting & breaks" };
+  }
+
+  // Summary tile catalogue (key -> label + html). Defaults per sport come from the sport
+  // catalogue (app/sports.py `tiles`), a user's own choice per sport from the preferences.
+  // `html()` returns "" when the activity has no data for that tile.
+  function tileDefs(a) {
+    const s = a.summary, pace = isPace(a.sport), k = a.ski, w = skiWords(a);
+    const rate = (v) => tile(v.label, fmtEle(v.value), `${u().eleL}/h`);
+    const leg = (side, f) => (k && k[side].count ? f(k[side]) : "");
+    const defs = {
+      distance: ["Distance", () => s.distance_m ? tile("Distance", fmtDist(s.distance_m), u().distL) : ""],
+      moving: ["Moving time", () => s.moving_s != null ? tile("Moving time", fmtDur(s.moving_s)) : ""],
+      elapsed: ["Elapsed time", () => s.elapsed_s != null ? tile("Elapsed time", fmtDur(s.elapsed_s)) : ""],
+      avg_speed: [pace ? "Avg pace" : "Avg speed", () => s.avg_speed_ms ? (pace ? tile("Avg pace", fmtPace(s.avg_speed_ms), "/" + u().distL) : tile("Avg speed", fmtSpeed(s.avg_speed_ms), u().speedL)) : ""],
+      max_speed: ["Max speed", () => s.max_speed_ms ? tile("Max speed", fmtSpeed(s.max_speed_ms), u().speedL) : ""],
+      elev_gain: ["Elevation gain", () => s.elev_gain_m != null ? tile("Elevation gain", fmtEle(s.elev_gain_m), u().eleL) : ""],
+      elev_loss: ["Elevation loss", () => s.elev_loss_m != null ? tile("Elevation loss", fmtEle(s.elev_loss_m), u().eleL) : ""],
+      ele_max: ["Highest point", () => s.ele_max_m != null ? tile("Highest point", fmtEle(s.ele_max_m), u().eleL) : ""],
+      ele_min: ["Lowest point", () => s.ele_min_m != null ? tile("Lowest point", fmtEle(s.ele_min_m), u().eleL) : ""],
+      avg_hr: ["Avg heart rate", () => s.avg_hr ? tile("Avg heart rate", fmtNum(s.avg_hr, 0), "bpm") : ""],
+      max_hr: ["Max heart rate", () => s.max_hr ? tile("Max heart rate", fmtNum(s.max_hr, 0), "bpm") : ""],
+      avg_power: ["Avg power", () => s.avg_power ? tile("Avg power", fmtNum(s.avg_power, 0), "W") : ""],
+      max_power: ["Max power", () => s.max_power ? tile("Max power", fmtNum(s.max_power, 0), "W") : ""],
+      normalized_power: ["Normalized power", () => s.normalized_power ? tile("Normalized power", fmtNum(s.normalized_power, 0), "W") : ""],
+      intensity_factor: ["Intensity factor", () => s.intensity_factor ? tile("Intensity factor", fmtNum(s.intensity_factor, 2)) : ""],
+      tss: ["TSS", () => s.tss ? tile("TSS", fmtNum(s.tss, 0)) : ""],
+      work: ["Work", () => s.work_kj ? tile("Work", fmtNum(s.work_kj, 0), "kJ") : ""],
+      trimp: ["TRIMP", () => s.trimp ? tile("TRIMP", fmtNum(s.trimp, 0)) : ""],
+      avg_cadence: ["Avg cadence", () => s.avg_cadence ? tile("Avg cadence", fmtNum(s.avg_cadence, 0), cadenceUnit(a.sport)) : ""],
+      max_cadence: ["Max cadence", () => s.max_cadence ? tile("Max cadence", fmtNum(s.max_cadence, 0), cadenceUnit(a.sport)) : ""],
+      avg_temp: ["Avg temp", () => s.avg_temp_c != null ? tile("Avg temp", fmtNum(s.avg_temp_c, 0), "°C") : ""],
+      down_count: [w.down, () => leg("down", (x) => tile(w.down, fmtNum(x.count, 0)))],
+      down_vertical: [`${w.downOne} vertical`, () => leg("down", (x) => tile(`${w.downOne} vertical`, fmtEle(x.vertical_m), u().eleL))],
+      down_distance: [`${w.downOne} distance`, () => leg("down", (x) => tile(`${w.downOne} distance`, fmtDist(x.distance_m), u().distL))],
+      down_time: [`${w.downOne} time`, () => leg("down", (x) => tile(`${w.downOne} time`, fmtDur(x.elapsed_s)))],
+      down_speed: [`Avg ${w.downOne.toLowerCase()} speed`, () => leg("down", (x) => x.avg_speed_ms ? tile(`Avg ${w.downOne.toLowerCase()} speed`, fmtSpeed(x.avg_speed_ms), u().speedL) : "")],
+      longest_down: [`Longest ${w.downOne.toLowerCase()}`, () => leg("down", (x) => tile(`Longest ${w.downOne.toLowerCase()}`, fmtDist(x.longest_m), u().distL))],
+      up_count: [w.up, () => leg("up", (x) => tile(w.up, fmtNum(x.count, 0)))],
+      up_time: [`${w.upOne} time`, () => leg("up", (x) => tile(`${w.upOne} time`, fmtDur(x.elapsed_s)))],
+      up_vertical: [`${w.upOne} vertical`, () => leg("up", (x) => tile(`${w.upOne} vertical`, fmtEle(x.vertical_m), u().eleL))],
+      up_rate: [`${w.upOne} rate (vertical)`, () => leg("up", (x) => x.vertical_rate_mh ? rate({ label: `${w.upOne} rate`, value: x.vertical_rate_mh }) : "")],
+      other_time: [w.other, () => (k ? tile(w.other, fmtDur(k.other_s)) : "")],
+    };
+    return Object.fromEntries(Object.entries(defs).map(([key, [label, html]]) => [key, { label, html }]));
+  }
+  const tileKeys = (sport) => state.prefs.tiles?.[sport] || sportInfo(sport)?.tiles || SPORTS.get("unknown")?.tiles || [];
+
+  // Choose and order the tiles of one sport; saved in the preferences.
+  function editTiles(a) {
+    const defs = tileDefs(a), dlg = $("#tiles-dialog"), list = $("#tile-pick");
+    const chosen = tileKeys(a.sport).filter((k) => defs[k]);
+    let order = [...chosen, ...Object.keys(defs).filter((k) => !chosen.includes(k))];
+    const on = new Set(chosen);
+    $("#tiles-sport").textContent = sportName(a.sport);
+    const draw = (focusKey, dir) => {
+      list.innerHTML = order.map((k, i) => `<li data-key="${k}" class="${on.has(k) ? "" : "off"}">
+        <label><input type="checkbox" ${on.has(k) ? "checked" : ""}> ${esc(defs[k].label)}${defs[k].html() ? "" : ' <span class="nodata">(no data here)</span>'}</label>
+        <button type="button" class="btn small ghost" data-move="-1" aria-label="Move ${esc(defs[k].label)} up" ${i ? "" : "disabled"}>↑</button>
+        <button type="button" class="btn small ghost" data-move="1" aria-label="Move ${esc(defs[k].label)} down" ${i < order.length - 1 ? "" : "disabled"}>↓</button></li>`).join("");
+      if (focusKey) list.querySelector(`li[data-key="${focusKey}"] [data-move="${dir}"]:not([disabled])`)?.focus();
+    };
+    list.onchange = (e) => {
+      const li = e.target.closest("li");
+      if (!li) return;
+      if (e.target.checked) on.add(li.dataset.key); else on.delete(li.dataset.key);
+      li.classList.toggle("off", !e.target.checked);
+    };
+    list.onclick = (e) => {
+      const b = e.target.closest("[data-move]");
+      if (!b) return;
+      const key = b.closest("li").dataset.key, i = order.indexOf(key), j = i + Number(b.dataset.move);
+      if (j < 0 || j >= order.length) return;
+      [order[i], order[j]] = [order[j], order[i]];
+      draw(key, b.dataset.move);
+    };
+    draw();
+    dlg.returnValue = "";
+    dlg.addEventListener("close", async () => {
+      if (!["save", "reset"].includes(dlg.returnValue)) return;
+      const keys = dlg.returnValue === "reset" ? null : order.filter((k) => on.has(k));
+      try {
+        await savePrefs({ tiles: { [a.sport]: keys } });
+        toast(keys ? `Tiles saved for ${sportName(a.sport)}` : `Default tiles restored for ${sportName(a.sport)}`);
+        route();
+      } catch (e) { toast("Could not save: " + e.message); }
+    }, { once: true });
+    dlg.showModal();
+  }
+
   async function renderActivity(id, win, opts = {}) {
     const token = newRender();
     disposeMap();
@@ -458,30 +602,16 @@
     }
     if (stale(token)) return;
     state.current = a; renderList();
+    if (state.mapFor !== a.id) applyMapDefaults(a.id);
+    state.legBands = a.ski ? a.ski.legs.map((l) => ({ i0: nearestIdx(a.series.idx, l.start), i1: nearestIdx(a.series.idx, l.end), up: l.type === "up" })) : null;
     const lapsMode = !!(laps && a.window);
     // Segment efforts inside the current view (indices are absolute, like the window).
     const efforts = (a.segment_efforts || []).filter((e) => !a.window || (e.start >= a.window.start && e.end <= a.window.end));
     const s = a.summary;
     const pace = isPace(a.sport);
 
-    const tiles = [
-      s.distance_m ? tile("Distance", fmtDist(s.distance_m), u().distL) : "",
-      s.moving_s != null ? tile("Moving time", fmtDur(s.moving_s)) : "",
-      s.elapsed_s != null ? tile("Elapsed time", fmtDur(s.elapsed_s)) : "",
-      s.avg_speed_ms ? (pace ? tile("Avg pace", fmtPace(s.avg_speed_ms), "/" + u().distL) : tile("Avg speed", fmtSpeed(s.avg_speed_ms), u().speedL)) : "",
-      s.max_speed_ms && !pace ? tile("Max speed", fmtSpeed(s.max_speed_ms), u().speedL) : "",
-      s.elev_gain_m != null ? tile("Elevation gain", fmtEle(s.elev_gain_m), u().eleL) : "",
-      s.avg_hr ? tile("Avg heart rate", fmtNum(s.avg_hr, 0), "bpm") : "",
-      s.max_hr ? tile("Max heart rate", fmtNum(s.max_hr, 0), "bpm") : "",
-      s.avg_power ? tile("Avg power", fmtNum(s.avg_power, 0), "W") : "",
-      s.normalized_power ? tile("Normalized power", fmtNum(s.normalized_power, 0), "W") : "",
-      s.intensity_factor ? tile("Intensity factor", fmtNum(s.intensity_factor, 2)) : "",
-      s.tss ? tile("TSS", fmtNum(s.tss, 0)) : "",
-      s.work_kj ? tile("Work", fmtNum(s.work_kj, 0), "kJ") : "",
-      s.trimp ? tile("TRIMP", fmtNum(s.trimp, 0)) : "",
-      s.avg_cadence ? tile("Avg cadence", fmtNum(s.avg_cadence, 0), cadenceUnit(a.sport)) : "",
-      s.avg_temp_c != null ? tile("Avg temp", fmtNum(s.avg_temp_c, 0), "°C") : "",
-    ].join("");
+    const tiles = tileKeys(a.sport).map((k) => tileDefs(a)[k]?.html() || "").join("") +
+      `<button type="button" class="tile tile-edit" id="tiles-btn" title="Choose the tiles shown for ${esc(sportName(a.sport))} activities"><span aria-hidden="true">⚙</span> Customize</button>`;
 
     main.innerHTML = `
       <div class="page-head">
@@ -530,6 +660,7 @@
             <div id="map"></div></div></div>` : ""}
         </div>` : ""}
         ${lapsMode ? `<div class="card"><h2><span>Laps</span><span class="muted" style="font-weight:400">click a row, then ↑/↓ to step through</span></h2><div class="table-scroll lap-list" id="lap-list"></div></div>` : ""}
+        ${a.ski ? `<div class="card" id="ski-card"></div>` : ""}
         ${efforts.length ? `<div class="card" id="seg-card"><h2><span>Segments</span><span class="muted" style="font-weight:400">${efforts.length} effort${efforts.length === 1 ? "" : "s"} · click a row to show it</span></h2>
           <div class="table-scroll lap-list" id="seg-list">${segEffortsTable(a, efforts)}</div></div>` : ""}
         <div class="card" id="charts-card"><h2><span>Data streams</span>
@@ -580,6 +711,8 @@
     setX(xMode);
     if (a.power_curve?.length) powerCurveChart($("#pc"), a.power_curve, false);
     if (lapsMode) renderLaps(a, laps);
+    if (a.ski) renderSki(a);
+    $("#tiles-btn").addEventListener("click", () => editTiles(a));
     if (efforts.length) wireSegEfforts(a, efforts);
     renderModuleCards(a);
     if (opts.effort) {
@@ -707,7 +840,8 @@
   function drawMap(a, laps) {
     disposeMap();
     const track = a.track;
-    map = L.map("map", { scrollWheelZoom: false, preferCanvas: true });
+    map = L.map("map", { scrollWheelZoom: false, preferCanvas: true, zoomSnap: 0.25 });
+    pinchZoom(map);
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
       maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
     }).addTo(map);
@@ -731,16 +865,43 @@
     const sel = $("#ov-sel");
     sel.innerHTML = `<option value="none">Nothing (route only)</option>` +
       defs.map((d) => `<option value="${d.key}" ${d.key === state.overlay ? "selected" : ""}>${esc(d.label)}</option>`).join("");
-    sel.addEventListener("change", () => { state.overlay = sel.value; lsSet("overlay", sel.value); drawOverlay(a); });
-    $("#pal-sel").addEventListener("change", (e) => { state.palette = e.target.value; lsSet("palette", state.palette); drawOverlay(a); });
+    // These change only the open activity; Settings holds the defaults every activity starts with.
+    sel.addEventListener("change", () => { state.overlay = sel.value; drawOverlay(a); });
+    $("#pal-sel").addEventListener("change", (e) => { state.palette = e.target.value; drawOverlay(a); });
     $("#pal-rev").addEventListener("click", (e) => {
-      state.paletteReverse = !state.paletteReverse; lsSet("paletteReverse", state.paletteReverse ? "1" : "0");
+      state.paletteReverse = !state.paletteReverse;
       e.currentTarget.setAttribute("aria-pressed", String(state.paletteReverse)); drawOverlay(a);
     });
     $("#map-size").addEventListener("click", () => setMapExpanded(!$("#map-card").classList.contains("expanded")));
     $("#map-pick").addEventListener("click", () => startPick(a));
     if (new URLSearchParams(location.search).has("debug")) window.__fitpushMap = map; // for UI tests
     drawOverlay(a);
+  }
+
+  // A trackpad pinch reaches the page as ctrl+wheel (Chrome, Edge, Firefox) or as gesture events
+  // (Safari). While wheel zoom is off (the map is part of the scrolling page) the browser would
+  // zoom the whole page instead; zoom the map around the pointer. Touch pinch is Leaflet's own.
+  function pinchZoom(m) {
+    const el = m.getContainer();
+    let acc = 0;
+    el.addEventListener("wheel", (e) => {
+      if (!e.ctrlKey) return;
+      e.preventDefault();
+      if (m.scrollWheelZoom.enabled()) return; // Leaflet's wheel zoom handles it
+      acc -= e.deltaY * (e.deltaMode === 1 ? 0.33 : 0.02); // ~50 px of pinch per zoom level
+      const snap = m.options.zoomSnap || 0.25, step = Math.trunc(acc / snap) * snap; // whole zoomSnap steps
+      if (!step) return;
+      acc -= step;
+      m.setZoomAround(m.mouseEventToContainerPoint(e), m.getZoom() + step, { animate: false });
+    }, { passive: false });
+    if (navigator.maxTouchPoints > 0) return; // touch screens: gesture events come with Leaflet's touch zoom
+    let z0 = null;
+    el.addEventListener("gesturestart", (e) => { e.preventDefault(); z0 = m.getZoom(); });
+    el.addEventListener("gesturechange", (e) => {
+      e.preventDefault();
+      if (z0 != null && e.scale > 0) m.setZoomAround(m.mouseEventToContainerPoint(e), z0 + Math.log2(e.scale), { animate: false });
+    });
+    el.addEventListener("gestureend", (e) => { e.preventDefault(); z0 = null; });
   }
 
   function setMapExpanded(on) {
@@ -815,6 +976,16 @@
         fmt: (v) => `${v > 0 ? "+" : v < 0 ? "−" : "±"}${fmtSpeed(Math.abs(v))} ${u().speedL}`,
         note: `average ${pace ? `${fmtPace(avg)} /${u().distL}` : `${fmtSpeed(avg)} ${u().speedL}`}` });
     }
+    if (a.ski) { // categories per series point: 0 = up leg, 1 = down leg, 2 = neither
+      const w = skiWords(a), legs = a.ski.legs, values = [];
+      let j = 0;
+      for (const i of se.idx) {
+        while (j < legs.length && legs[j].end < i) j++;
+        values.push(j < legs.length && legs[j].start <= i ? (legs[j].type === "up" ? 0 : 1) : 2);
+      }
+      defs.push({ key: "phase", label: a.ski.mode === "touring" ? "Climbs / descents" : "Lifts / runs", values,
+        categories: [[w.up, LEG_COLOR.up], [w.down, LEG_COLOR.down], [w.other, LEG_COLOR.other]].map(([label, tok]) => ({ label, color: css(tok) })) });
+    }
     return defs;
   }
 
@@ -823,7 +994,8 @@
     overlayLayer.clearLayers();
     const def = overlayDefs(a).find((d) => d.key === state.overlay);
     const legend = legendCtl.getContainer();
-    for (const id of ["#pal-wrap", "#pal-rev"]) { const el = $(id); if (el) el.hidden = !def; }
+    const cats = def?.categories; // categorical colouring (ski legs): fixed colours, no palette
+    for (const id of ["#pal-wrap", "#pal-rev"]) { const el = $(id); if (el) el.hidden = !def || !!cats; }
     if (!def) {
       baseLine.setStyle({ opacity: 0.9 });
       legend.hidden = true;
@@ -831,10 +1003,11 @@
       return;
     }
     baseLine.setStyle({ opacity: 0 });
-    const steps = paletteSteps(def.diverging);
+    const steps = cats ? cats.map((c) => c.color) : paletteSteps(def.diverging);
     const vals = def.values.filter((v) => v != null).sort((x, y) => x - y);
     let lo, hi;
-    if (def.diverging) { // symmetric around 0 so the gray middle step means "average"
+    if (cats) { lo = 0; hi = steps.length; }
+    else if (def.diverging) { // symmetric around 0 so the gray middle step means "average"
       const lim = quantile(vals.map(Math.abs).sort((x, y) => x - y), 0.95) || 1;
       lo = -lim; hi = lim;
     } else {             // clip outliers (GPS spikes, stops) to the 5th–95th percentile
@@ -875,14 +1048,20 @@
     if (sel) drawRuns(split(false), 3, 0.25, false);
     // Casing under the coloured line keeps pale steps visible on any map tile.
     drawRuns(sel ? split(true) : [pts], 4.5, 1, true);
+    legend.hidden = false;
+    const note = sel ? `<div class="muted lg-note">Colour shows the selection; the rest is faded.</div>` : "";
+    if (cats) {
+      legend.innerHTML = `<div class="lg-title">${esc(def.label)}</div>
+        <div class="lg-cats">${cats.map((c) => `<span><span class="leg-sw" style="background:${c.color}"></span>${esc(c.label)}</span>`).join("")}</div>${note}`;
+      raiseMapMarks();
+      return;
+    }
     const [loTxt, hiTxt] = def.ends ? def.ends(lo, hi, def.fmt)
       : def.diverging ? [`slower ${def.fmt(lo)}`, `faster ${def.fmt(hi)}`]
       : [`≤ ${def.fmt(lo)}`, `≥ ${def.fmt(hi)}`];
-    legend.hidden = false;
     legend.innerHTML = `<div class="lg-title">${esc(def.label)}${def.note ? ` <span class="muted">(${esc(def.note)})</span>` : ""}</div>
       <div class="lg-ramp">${steps.map((c) => `<span style="background:${c}"></span>`).join("")}</div>
-      <div class="lg-labels"><span>${esc(loTxt)}</span>${def.diverging ? "<span>avg</span>" : ""}<span>${esc(hiTxt)}</span></div>
-      ${sel ? `<div class="muted lg-note">Colour shows the selection; the rest is faded.</div>` : ""}`;
+      <div class="lg-labels"><span>${esc(loTxt)}</span>${def.diverging ? "<span>avg</span>" : ""}<span>${esc(hiTxt)}</span></div>${note}`;
     raiseMapMarks();
   }
 
@@ -900,7 +1079,11 @@
     const se = a.series;
     const pace = isPace(a.sport);
     const defs = [];
-    if (se.elevation_m) defs.push({ key: "elevation", label: `Elevation (${u().eleL})`, color: "--m-elevation", fill: true, y: se.elevation_m.map((v) => (v == null ? null : v * u().ele)), fmt: (v) => `${fmtNum(v, 0)} ${u().eleL}` });
+    if (se.elevation_m) {
+      const w = a.ski && skiWords(a);
+      defs.push({ key: "elevation", label: `Elevation (${u().eleL})`, color: "--m-elevation", fill: true, y: se.elevation_m.map((v) => (v == null ? null : v * u().ele)), fmt: (v) => `${fmtNum(v, 0)} ${u().eleL}`,
+        note: w ? `<span class="chart-note"><span class="leg-sw" style="background:var(${LEG_COLOR.up})"></span>${esc(w.up)} <span class="leg-sw" style="background:var(${LEG_COLOR.down})"></span>${esc(w.down)}</span>` : "" });
+    }
     if (se.speed_ms && se.distance_m.at(-1) > 0) {
       if (pace) {
         // Pace: clamp slow stretches (stops) so the axis stays readable; faster = higher.
@@ -926,7 +1109,7 @@
     const defs = streamDefs(a);
     const box = $("#charts");
     if (!defs.length) { box.innerHTML = `<p class="muted">This file has no sensor streams to plot.</p>`; return; }
-    box.innerHTML = defs.map((d, i) => `<div class="chart-block"><div class="chart-title"><span class="sw" style="background:var(${d.color})"></span>${esc(d.label)}</div>
+    box.innerHTML = defs.map((d, i) => `<div class="chart-block"><div class="chart-title"><span class="sw" style="background:var(${d.color})"></span>${esc(d.label)}${d.note || ""}</div>
       <div class="chart-wrap" style="${i === defs.length - 1 ? "height:150px" : ""}"><canvas data-key="${d.key}"></canvas></div></div>`).join("");
 
     const xMin = xs[0], xMax = xs.at(-1);
@@ -1211,6 +1394,96 @@
     refresh();
   }
 
+  // ------------------------------------------------------------------ ski legs (uphill / downhill)
+  // Ski touring: climbs vs descents; resort skiing: lift rides vs runs (app/ski.py). The card
+  // compares the two sides and lists every leg; a row selects that leg (charts, map, sel-bar).
+  const LEG_COLOR = { up: "--cat-4", down: "--cat-1", other: "--cat-other" };
+  function renderSki(a) {
+    const k = a.ski, w = skiWords(a), legs = k.legs, card = $("#ski-card");
+    const total = a.summary.elapsed_s || 0;
+    const dash = '<span class="muted">–</span>';
+    const dist = (v) => (v == null ? dash : `${fmtDist(v)} ${u().distL}`);
+    const ele = (v) => (v == null ? dash : `${fmtEle(v)} ${u().eleL}`);
+    const spd = (v) => (v == null ? dash : `${fmtSpeed(v)} ${u().speedL}`);
+    const rate = (v) => (v == null ? dash : `${fmtEle(v)} ${u().eleL}/h`);
+    const bpm = (v) => (v == null ? dash : `${fmtNum(v, 0)} bpm`);
+    const pct = (s) => (total && s != null ? `${Math.round((s / total) * 100)}%` : dash);
+    const sw = (type) => `<span class="leg-sw" style="background:var(${LEG_COLOR[type]})" aria-hidden="true"></span>`;
+    const name = (l) => `${l.type === "up" ? w.upOne : w.downOne} ${l.index}`;
+    const key = (l) => `${l.type}${l.index}`;
+    const hasHr = legs.some((l) => l.avg_hr != null);
+
+    const sides = [["up", w.up], ["down", w.down]].filter(([s]) => k[s].count);
+    const rows = [
+      ["Count", (t) => fmtNum(t.count, 0)],
+      ["Time", (t) => fmtDur(t.elapsed_s)],
+      ["Share of elapsed time", (t) => pct(t.elapsed_s)],
+      ["Distance", (t) => dist(t.distance_m)],
+      ["Vertical", (t) => ele(t.vertical_m)],
+      ["Vertical rate", (t) => rate(t.vertical_rate_mh)],
+      ["Avg speed (moving)", (t) => spd(t.avg_speed_ms)],
+      ["Max speed", (t) => spd(t.max_speed_ms)],
+      ...(hasHr ? [["Avg heart rate", (t) => bpm(t.avg_hr)], ["Max heart rate", (t) => bpm(t.max_hr)]] : []),
+      ["Longest", (t) => (t.longest_index ? `${dist(t.longest_m)} <span class="muted">(#${t.longest_index})</span>` : dash)],
+      ["Biggest vertical", (t) => ele(t.max_vertical_m)],
+    ];
+    const compare = `<div class="table-scroll"><table class="cmp"><thead><tr><th></th>${sides.map(([s, l]) => `<th>${sw(s)} ${esc(l)}</th>`).join("")}</tr></thead><tbody>
+      ${rows.map(([label, f]) => `<tr><th scope="row">${esc(label)}</th>${sides.map(([s]) => `<td>${f(k[s])}</td>`).join("")}</tr>`).join("")}
+      </tbody></table></div>
+      <p class="muted small-note">${sw("other")} ${esc(w.other)}: ${fmtDur(k.other_s)} (${pct(k.other_s)}) — time on neither side${k.mode === "resort" ? ", such as lift queues" : ", such as summit breaks and transitions"}.</p>`;
+
+    const cols = [
+      ["", (l) => `${sw(l.type)} ${esc(name(l))}`],
+      ["Start", (l) => fmtDur(l.start_offset_s)],
+      ["Time", (l) => fmtDur(l.elapsed_s)],
+      ["Distance", (l) => dist(l.distance_m)],
+      ["Vertical", (l) => `${l.type === "up" ? "+" : "−"}${ele(l.vertical_m)}`],
+      ["Rate", (l) => rate(l.vertical_rate_mh)],
+      ["Avg speed", (l) => spd(l.avg_speed_ms)],
+      ["Max speed", (l) => spd(l.max_speed_ms)],
+      ["Grade", (l) => (l.avg_grade_pct == null ? dash : `${fmtNum(l.avg_grade_pct, 0)}%`)],
+      ...(hasHr ? [["Avg HR", (l) => fmtNum(l.avg_hr, 0)]] : []),
+    ];
+    card.innerHTML = `<h2><span>${esc(w.card)}</span><span class="muted" style="font-weight:400">${k[sides[0][0]].count} ${esc(sides[0][1].toLowerCase())}${sides[1] ? ` · ${k[sides[1][0]].count} ${esc(sides[1][1].toLowerCase())}` : ""}</span></h2>
+      ${compare}
+      <div class="ski-list-head"><span class="seg" role="group" aria-label="Show"><button data-legs="all">All</button><button data-legs="up">${esc(w.up)}</button><button data-legs="down">${esc(w.down)}</button></span>
+        <span class="muted small-note">click a row to select it, ↑/↓ to step through</span></div>
+      <div class="table-scroll lap-list" id="leg-list"></div>`;
+
+    let filter = "all";
+    const list = $("#leg-list");
+    const shown = () => legs.filter((l) => filter === "all" || l.type === filter);
+    const drawList = () => {
+      card.querySelectorAll("[data-legs]").forEach((b) => b.classList.toggle("active", b.dataset.legs === filter));
+      list.innerHTML = `<table><thead><tr>${cols.map(([h]) => `<th>${esc(h)}</th>`).join("")}</tr></thead><tbody>
+        ${shown().map((l) => `<tr data-leg="${key(l)}" tabindex="0" aria-selected="${state.named?.leg === key(l)}">${cols.map(([, f]) => `<td>${f(l)}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
+    };
+    card.querySelectorAll("[data-legs]").forEach((b) => b.addEventListener("click", () => { filter = b.dataset.legs; drawList(); }));
+    const selectLeg = (l) => {
+      if (state.named?.leg === key(l)) { state.sel = null; renderSelection(a); return; } // click again to deselect
+      const idx = a.series.idx;
+      state.sel = { i0: nearestIdx(idx, l.start), i1: nearestIdx(idx, l.end) };
+      state.lap = null; state.lapRange = null; state.effort = null;
+      state.named = { name: name(l), range: { ...state.sel }, leg: key(l) };
+      renderSelection(a);
+      list.querySelector(`tr[data-leg="${key(l)}"]`)?.scrollIntoView({ block: "nearest" });
+    };
+    const byKey = (kk) => legs.find((l) => key(l) === kk);
+    list.addEventListener("click", (e) => { const tr = e.target.closest("tr[data-leg]"); if (tr) selectLeg(byKey(tr.dataset.leg)); });
+    list.addEventListener("keydown", (e) => {
+      const tr = e.target.closest("tr[data-leg]");
+      if (!tr) return;
+      const vis = shown(), i = vis.findIndex((l) => key(l) === tr.dataset.leg);
+      const j = e.key === "ArrowDown" ? i + 1 : e.key === "ArrowUp" ? i - 1 : (e.key === "Enter" || e.key === " ") ? i : null;
+      if (j == null || j < 0 || j >= vis.length) return;
+      e.preventDefault();
+      if (j !== i || e.key === "Enter" || e.key === " ") selectLeg(vis[j]);
+      list.querySelector(`tr[data-leg="${key(vis[j])}"]`)?.focus();
+    });
+    drawList();
+    state.selListeners.push(() => list.querySelectorAll("tr[data-leg]").forEach((tr) => tr.setAttribute("aria-selected", String(state.named?.leg === tr.dataset.leg))));
+  }
+
   function zonesHtml(zones) {
     const total = zones.reduce((s, z) => s + z.time_s, 0) || 1;
     const max = Math.max(...zones.map((z) => z.time_s), 1);
@@ -1366,7 +1639,8 @@
           </tbody></table></div>` : `<p class="muted">None yet.</p>`}
       </div>`;
 
-    map = L.map("map", { scrollWheelZoom: false, preferCanvas: true });
+    map = L.map("map", { scrollWheelZoom: false, preferCanvas: true, zoomSnap: 0.25 });
+    pinchZoom(map);
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
       maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
     }).addTo(map);
@@ -1477,6 +1751,7 @@
     /** Leaflet map with the standard tiles; removed automatically when the page changes. */
     map(el, opts = {}) {
       const m = L.map(el, { preferCanvas: true, scrollWheelZoom: true, ...opts });
+      pinchZoom(m); // a module map with wheel zoom off still zooms on a trackpad pinch
       L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
         maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
       }).addTo(m);
@@ -1680,6 +1955,9 @@
     { title: "The summary", target: () => $(".tiles"), page: "run",
       body: "Distance, moving time, pace, elevation, heart rate, cadence… all worked out from the raw file on your computer.",
       next: "Next" },
+    { title: "Your tiles", target: () => $("#tiles-btn"), page: "run",
+      body: "Each sport starts with tiles that suit it. <b>⚙ Customize</b> picks and orders them, once for each sport.",
+      next: "Next" },
     { title: "Data streams", target: () => $("#charts-card"), page: "run",
       body: "Move the pointer over a chart. The values appear above the charts and a dot follows on the map.",
       done: () => state.hoverIdx != null },
@@ -1699,7 +1977,7 @@
       body: "Every number on the page now covers just this stretch. It is temporary; the original stays as it is. Click <b>Show full activity</b> to go back.",
       done: fullRun, auto: () => go(tourHash()) },
     { title: "Colour the track", target: () => $("#ov-sel"), page: "run",
-      body: "Colour the route on the map by a measure: choose <b>Pace</b>, <b>Heart rate</b> or <b>Elevation</b>.",
+      body: "Colour the route on the map by a measure: choose <b>Pace</b>, <b>Heart rate</b> or <b>Elevation</b>. <b>Settings</b> sets the colouring every activity opens with.",
       done: () => state.overlay !== "none",
       auto: () => { const s = $("#ov-sel"); if (s) { s.value = "speed"; s.dispatchEvent(new Event("change")); } } },
     { title: "Colour patterns", target: () => $("#pal-wrap"), page: "run",
@@ -1761,7 +2039,8 @@
     tour.id = r.activity_id;
     if (r.created) await Promise.all([loadList(), loadTags()]);
     Object.assign(tour, { on: true, i: resume?.id === tour.id ? resume.i : 0, seen: null, ask: false,
-      base: { palette: state.palette, reverse: state.paletteReverse } });
+      base: { palette: PREF_DEFAULTS.map_palette, reverse: PREF_DEFAULTS.map_reverse } }); // the run opens with these
+    state.mapFor = null;
     // Clear list filters that could hide the tutorial run.
     if (state.sport || state.tagFilter) { state.sport = ""; state.tagFilter = ""; $("#sport-filter").value = ""; renderTagFilter(); renderList(); }
     document.body.insertAdjacentHTML("beforeend", `
@@ -1957,6 +2236,6 @@
   window.addEventListener("hashchange", route);
   $("#tag-filter").addEventListener("change", (e) => { state.tagFilter = e.target.value; renderList(); });
   loadSports()
-    .then(() => Promise.all([loadList(), loadSegments(), loadTags(), loadModules()]))
+    .then(() => Promise.all([loadList(), loadSegments(), loadTags(), loadModules(), loadPrefs()]))
     .then(() => { route(); resumeTour(); }).catch((e) => { main.innerHTML = `<div class="welcome"><h1>Cannot reach the server</h1><p class="muted">${esc(e.message)}</p></div>`; });
 })();
