@@ -96,6 +96,7 @@ def stats(rows: list[dict]) -> dict:
 OVERPASS_URL = "https://overpass-api.de/api/interpreter"  # FITPUSH_OVERPASS_URL overrides it
 PARK = "[boundary=national_park]"
 PARK2 = '[boundary=protected_area][protect_class="2"]'  # IUCN category II = national park
+RANGE = "[natural=mountain_range]"
 
 
 def route_middle(lines: list[list]) -> list[float] | None:
@@ -114,13 +115,16 @@ def route_middle(lines: list[list]) -> list[float] | None:
 
 
 def overpass_place(point: list[float]) -> dict:
-    """National park (containing the point, else the nearest within 25 km) and the nearest
-    city or town (within 30 km, else village) from the Overpass API."""
+    """From the Overpass API: the national park and the mountain range containing the point
+    (else the nearest within 25 / 60 km) and the nearest city or town (within 30 km, else a
+    village). Each is ``{name, inside, distance_m}`` or None; the place also has ``kind``."""
     lat, lon = point
-    near = f"(around:25000,{lat},{lon})"
+    park_near, range_near = f"(around:25000,{lat},{lon})", f"(around:60000,{lat},{lon})"
     query = (
-        f"[out:json][timeout:25];is_in({lat},{lon})->.a;(area.a{PARK};area.a{PARK2};);out tags;"
-        f"(relation{near}{PARK};way{near}{PARK};relation{near}{PARK2};);out tags center;"
+        f"[out:json][timeout:25];is_in({lat},{lon})->.a;"
+        f"(area.a{PARK};area.a{PARK2};area.a{RANGE};);out tags;"
+        f"(relation{park_near}{PARK};way{park_near}{PARK};relation{park_near}{PARK2};"
+        f"nwr{range_near}{RANGE}[name];);out tags center;"
         f'node(around:30000,{lat},{lon})[place~"^(city|town|village)$"][name];out tags;'
     )
     req = urllib.request.Request(
@@ -138,25 +142,29 @@ def overpass_place(point: list[float]) -> dict:
         tags = e.get("tags") or {}
         return tags.get("name:en") or tags.get("name") or ""
 
-    park = None
-    inside = [e for e in elements if e.get("type") == "area" and name(e)]
-    if inside:
-        park = {"name": name(inside[0]), "inside": True, "distance_m": 0.0}
-    else:
-        parks = [
-            {"name": name(e), "inside": False, "distance_m": haversine(point, [e["center"]["lat"], e["center"]["lon"]])}
-            for e in elements
-            if e.get("type") in ("way", "relation") and e.get("center") and name(e)
+    def where(e: dict) -> list[float] | None:
+        c = e.get("center") or e
+        return [c["lat"], c["lon"]] if "lat" in c and "lon" in c else None
+
+    def best(kind) -> dict | None:
+        """A matching area containing the point, else the nearest match with a position."""
+        found = [e for e in elements if name(e) and kind(e.get("tags") or {})]
+        inside = [e for e in found if e.get("type") == "area"]
+        if inside:
+            return {"name": name(inside[0]), "inside": True, "distance_m": 0.0}
+        near = [
+            {"name": name(e), "inside": False, "distance_m": haversine(point, p), "kind": e["tags"].get("place")}
+            for e in found
+            if (p := where(e))
         ]
-        park = min(parks, key=lambda p: p["distance_m"], default=None)
-    places = [
-        {"name": name(e), "kind": e["tags"]["place"], "distance_m": haversine(point, [e["lat"], e["lon"]])}
-        for e in elements
-        if e.get("type") == "node" and "lat" in e and name(e)
-    ]
-    towns = [p for p in places if p["kind"] in ("city", "town")] or places
-    city = min(towns, key=lambda p: p["distance_m"], default=None)
-    return {"point": point, "park": park, "city": city}
+        return min(near, key=lambda x: x["distance_m"], default=None)
+
+    return {
+        "point": point,
+        "park": best(lambda t: t.get("boundary") == "national_park" or t.get("protect_class") == "2"),
+        "range": best(lambda t: t.get("natural") == "mountain_range"),
+        "city": best(lambda t: t.get("place") in ("city", "town")) or best(lambda t: t.get("place") == "village"),
+    }
 
 
 def register(ctx: ModuleContext) -> None:
@@ -451,7 +459,7 @@ def register(ctx: ModuleContext) -> None:
         return json.loads(rows[0]["value"]) if rows else None
 
     def store_place(adv_id: int, place: dict) -> None:
-        keep = {k: place.get(k) for k in ("point", "park", "city", "name")}
+        keep = {k: place.get(k) for k in ("point", "park", "range", "city", "name")}
         ctx.db.execute(f"INSERT OR REPLACE INTO {pl_t} (adventure_id, value) VALUES (?, ?)", (adv_id, json.dumps(keep)))
 
     def lookup(ids: list[int]) -> dict:
@@ -464,7 +472,7 @@ def register(ctx: ModuleContext) -> None:
         if point is None:
             raise Invalid("none of these activities has GPS")
         place = overpass_place(point)
-        names = [p["name"] for p in (place["park"], place["city"]) if p]
+        names = [p["name"] for p in (place["park"] or place["range"], place["city"]) if p]  # park beats range
         first = next((r["start_time"] for r in rows if r["start_time"]), None)
         place["name"] = f"{first[:7]} {', '.join(names)}" if names and first else (", ".join(names) or None)
         return place

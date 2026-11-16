@@ -190,11 +190,30 @@ class FakeOverpass:
 PARK_INSIDE = {
     "type": "area",
     "id": 1,
-    "tags": {"name": "Kampinoski Park Narodowy", "name:en": "Kampinos National Park"},
+    "tags": {"name": "Kampinoski Park Narodowy", "name:en": "Kampinos National Park", "boundary": "national_park"},
 }
 CITY = {"type": "node", "id": 2, "lat": 52.26, "lon": 21.01, "tags": {"name": "Warszawa", "place": "city"}}
 VILLAGE = {"type": "node", "id": 3, "lat": 52.25, "lon": 21.012, "tags": {"name": "Wieś", "place": "village"}}
-PARK_NEAR = {"type": "relation", "id": 4, "center": {"lat": 52.4, "lon": 21.0}, "tags": {"name": "Far Park"}}
+PARK_NEAR = {
+    "type": "relation",
+    "id": 4,
+    "center": {"lat": 52.4, "lon": 21.0},
+    "tags": {"name": "Far Park", "boundary": "protected_area", "protect_class": "2"},
+}
+RANGE_INSIDE = {"type": "area", "id": 5, "tags": {"name": "Pasmo", "natural": "mountain_range"}}
+RANGE_NEAR = {
+    "type": "node",
+    "id": 6,
+    "lat": 52.5,
+    "lon": 21.0,
+    "tags": {"name": "Far Range", "natural": "mountain_range"},
+}
+RANGE_NEARER = {
+    "type": "way",
+    "id": 7,
+    "center": {"lat": 52.3, "lon": 21.0},
+    "tags": {"name": "Near Range", "natural": "mountain_range"},
+}
 
 
 def test_place_lookup_names_the_trip(make_client, monkeypatch):
@@ -242,3 +261,22 @@ def test_suggestion_details_and_preview_tracks(make_client):
     assert [a["id"] for a in s["activities"]] == ids and s["activities"][0]["name"] == "Ride"
     lines = client.get(f"{API}/tracks?ids={','.join(map(str, ids))},9999,x").json()
     assert [t["id"] for t in lines] == ids and all(len(t["track"]) > 10 for t in lines)
+
+
+def test_place_lookup_mountain_range(make_client, monkeypatch):
+    fake = FakeOverpass([RANGE_NEAR, RANGE_NEARER, CITY])
+    monkeypatch.setenv("FITPUSH_OVERPASS_URL", fake.url)
+    client = make_client(modules="adventures")
+    ids = traverse(client)
+    place = client.post(f"{API}/place", json={"activity_ids": ids}).json()
+    assert place["range"]["name"] == "Near Range" and not place["range"]["inside"] and place["park"] is None
+    assert place["name"] == "2026-11 Near Range, Warszawa"  # without a park the range names the trip
+    assert "natural=mountain_range" in fake.queries[0]
+    fake2 = FakeOverpass([RANGE_INSIDE, PARK_INSIDE, CITY])
+    monkeypatch.setenv("FITPUSH_OVERPASS_URL", fake2.url)
+    place = client.post(f"{API}/place", json={"activity_ids": ids}).json()
+    assert place["range"] == {"name": "Pasmo", "inside": True, "distance_m": 0.0}
+    assert place["park"]["name"] == "Kampinos National Park"
+    assert place["name"] == "2026-11 Kampinos National Park, Warszawa"  # a park beats the range
+    adv = client.post(f"{API}/adventures", json={"name": "x", "activity_ids": ids, "place": place}).json()
+    assert adv["place"]["range"]["name"] == "Pasmo"

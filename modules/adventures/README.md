@@ -45,9 +45,11 @@ Endpoints (under `/api/m/adventures`):
 - `GET /activities?from=&to=`: compact activity list for the "add activities" picker.
 - `GET /tracks?ids=1,2`: GPS lines for the map preview of an unfolded proposal
   (proposals also carry `activities` with id, name, sport, start time and distance).
-- `POST /place` `{activity_ids}`: the national park and nearest city around the route,
-  `{point, park: {name, inside, distance_m}, city: {name, kind, distance_m}, name}`, where
-  `name` is the proposed adventure name `"YYYY-MM Park, City"` (only the parts found).
+- `POST /place` `{activity_ids}`: the national park, mountain range and nearest city
+  around the route, `{point, park, range, city, name}` (each `{name, inside, distance_m}`
+  or null; `city` also has `kind`), where `name` is the proposed adventure name
+  `"YYYY-MM Park, City"`, with the range in place of the park when there is no park
+  (only the parts found).
   `POST /adventures/{id}/place` does the same for an adventure and stores the result;
   `POST /adventures` accepts that result as `place`.
 
@@ -56,8 +58,9 @@ proposal, **Find place**) and only when the `osm_names` setting is on (default).
 one point, the middle of the route rounded to 3 decimals (~100 m), to the Overpass API
 (`FITPUSH_OVERPASS_URL` overrides the endpoint; tests use a local fake). The query
 asks for national parks (`boundary=national_park` or `boundary=protected_area` with
-`protect_class=2`) containing the point, else the nearest one within 25 km, and the
-nearest `place=city|town` within 30 km (a village when there is none).
+`protect_class=2`) containing the point, else the nearest one within 25 km, mountain ranges
+(`natural=mountain_range`) containing the point, else the nearest within 60 km, and the
+nearest `place=city|town` within 30 km (a village when there is none). One request.
 - `GET /activity/{id}`: adventures containing one activity (for the header line).
 
 Events: `activity.deleted` removes the activity from adventures (an adventure left empty
@@ -74,4 +77,4 @@ Reads activities, summaries, tags and thinned GPS tracks through `ctx.core`. Sto
 `m_adventures_adventures` (id, name, type, notes, created_at),
 `m_adventures_members` (adventure_id, activity_id), `m_adventures_settings`
 (key, JSON value), `m_adventures_dismissed` (proposal key = sorted activity ids) and
-`m_adventures_places` (adventure_id, JSON of the looked-up park and city).
+`m_adventures_places` (adventure_id, JSON of the looked-up park, range and city).

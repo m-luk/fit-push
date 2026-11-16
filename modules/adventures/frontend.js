@@ -13,7 +13,7 @@
   });
   const U = () => sdk.fmt.units();
   // "in Kampinos National Park · near Warszawa"
-  const placeText = (p) => [p.park && `${p.park.inside ? "in" : "near"} ${p.park.name}`, p.city && `near ${p.city.name}`].filter(Boolean).join(" · ");
+  const placeText = (p) => [p.park && `${p.park.inside ? "in" : "near"} ${p.park.name}`, p.range && `⛰️ ${p.range.name}`, p.city && `near ${p.city.name}`].filter(Boolean).join(" · ");
   const unitM = () => (U().distL === "mi" ? 1609.344 : 1000);
   const day = (iso) => (iso ? sdk.fmt.day(`${iso.slice(0, 10)}T12:00:00`) : "–"); // a calendar day, not a UTC instant
   const span = (a, b) => (a === b ? day(a) : `${day(a)} – ${day(b)}`);
@@ -215,7 +215,7 @@
         <div class="adv-actions">
           <span class="seg" role="group" aria-label="Adventure type">${Object.entries(TYPES).map(([k, [i, l]]) => `<button type="button" data-type="${k}">${i} ${l}</button>`).join("")}</span>
           <button type="button" class="btn" id="adv-rename">Rename</button>
-          <button type="button" class="btn" id="adv-place" title="Find the national park and nearest city on OpenStreetMap (sends one rounded point of the route)">Find place</button>
+          <button type="button" class="btn" id="adv-place" title="Find the national park, mountain range and nearest city on OpenStreetMap (sends one rounded point of the route)">Find place</button>
           <button type="button" class="btn" id="adv-edit" aria-expanded="false">Edit activities</button>
           <button type="button" class="btn danger" id="adv-delete">Delete</button></div></div>
       <div id="adv-picker"></div>
