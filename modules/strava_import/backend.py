@@ -12,7 +12,7 @@ import io
 import posixpath
 import re
 import zipfile
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Annotated, Any
 
 from fastapi import File, Form, UploadFile
@@ -221,7 +221,7 @@ def register(ctx: ModuleContext) -> None:
                 existing.append((datetime.fromisoformat(a["start_time"]).timestamp(), a["id"]))
         existing.sort()
         stored = {r["activity_id"]: r for r in ctx.db.query(f"SELECT * FROM {acts_t}")}
-        now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        now = datetime.now(UTC).isoformat(timespec="seconds")
 
         def by_start(start: str | None) -> int | None:
             if not start:

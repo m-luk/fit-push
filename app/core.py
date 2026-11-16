@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from . import sports, tutorial
 from .analytics import ANALYSIS_VERSION, _prepare, activity_to_columns, analyse, point_count, window_columns
@@ -145,7 +145,7 @@ class Core:
             t = _prepare(activity_to_columns(act))["t"]
         except (ParseError, ValueError) as exc:
             raise Invalid(str(exc)) from exc
-        start = datetime.fromtimestamp(float(t[0]), tz=timezone.utc).isoformat() if len(t) and t[0] == t[0] else None
+        start = datetime.fromtimestamp(float(t[0]), tz=UTC).isoformat() if len(t) and t[0] == t[0] else None
         return {
             "sha256": sha,
             "duplicate_of": self.store.find_by_hash(sha),

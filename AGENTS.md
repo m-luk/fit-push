@@ -11,7 +11,7 @@ gzipped), stores them in SQLite and shows analytics: summaries, charts, map,
 splits, HR zones, power curve, best efforts, trimmed views and exports, repeating
 lap detection, segments, tags. Optional features come as **modules**.
 
-- Backend: Python 3.10+, FastAPI, numpy, gpxpy, fitdecode, SQLite (stdlib).
+- Backend: Python 3.12+, FastAPI, numpy, gpxpy, fitdecode, SQLite (stdlib).
 - Frontend: one page, plain JavaScript (no build step), Chart.js 4 and Leaflet 1.9
   from cdnjs, OpenStreetMap tiles.
 
@@ -52,7 +52,7 @@ Static files are served `no-cache`, so a normal browser refresh picks up JS/CSS.
 
 GitHub Actions (`.github/workflows/ci.yml`) and GitLab CI (`.gitlab-ci.yml`) run:
 - ruff check, ruff format --check, ty check, `node --check`;
-- pytest on Linux/Windows/macOS and Python 3.10–3.13;
+- pytest on Linux/Windows/macOS and Python 3.12–3.13;
 - `scripts/modules.py check`;
 - the UI smoke test, with modules and core-only.
 

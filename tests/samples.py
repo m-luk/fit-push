@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import math
 import struct
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
-START = datetime(2026, 11, 1, 8, 0, 0, tzinfo=timezone.utc)
+START = datetime(2026, 11, 1, 8, 0, 0, tzinfo=UTC)
 LAT0, LON0 = 52.2297, 21.0122
 M_PER_DEG_LAT = 111_195.0
 

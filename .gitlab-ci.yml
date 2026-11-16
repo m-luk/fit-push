@@ -42,7 +42,7 @@ test:
   stage: test
   parallel:
     matrix:
-      - PY: ["3.10", "3.12", "3.13"]
+      - PY: ["3.12", "3.13"]
   image: python:${PY}-slim
   script:
     - *install

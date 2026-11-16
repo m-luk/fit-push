@@ -7,7 +7,7 @@ import sqlite3
 import threading
 import zlib
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from .analytics import DEFAULT_SETTINGS
@@ -110,7 +110,7 @@ class Store:
                     name,
                     sport,
                     summary.get("start_time"),
-                    datetime.now(timezone.utc).isoformat(),
+                    datetime.now(UTC).isoformat(),
                     json.dumps(summary),
                     blob,
                 ),
@@ -228,7 +228,7 @@ class Store:
         with self._tx() as c:
             return c.execute(
                 "INSERT INTO segments (name, sport, source_activity_id, created_at, geometry) VALUES (?,?,?,?,?)",
-                (name, sport, source_activity_id, datetime.now(timezone.utc).isoformat(), json.dumps(geometry)),
+                (name, sport, source_activity_id, datetime.now(UTC).isoformat(), json.dumps(geometry)),
             ).lastrowid
 
     def list_segments(self) -> list[dict]:

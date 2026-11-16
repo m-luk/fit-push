@@ -7,7 +7,7 @@ Points are stored column-wise (``{"t": [...], "lat": [...], ...}``) with
 from __future__ import annotations
 
 import math
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import numpy as np
@@ -404,7 +404,7 @@ def analyse(
 
     moving_s = float(moving_time[-1]) if has_time else None
     summary = {
-        "start_time": datetime.fromtimestamp(t[0], tz=timezone.utc).isoformat() if has_time else None,
+        "start_time": datetime.fromtimestamp(t[0], tz=UTC).isoformat() if has_time else None,
         "distance_m": _num(dist[-1]),
         "distance_source": dist_source,
         "elapsed_s": _num(elapsed, 0),
