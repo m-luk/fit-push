@@ -220,4 +220,8 @@ Use the **ui-development** skill for any change under `app/static/`, and the
 
 - Development on Windows with PowerShell 7 and Python from scoop; the venv
   interpreter is `.venv\Scripts\python.exe`.
+- CI type-checks on Linux, and ty checks for the platform it runs on. Guard OS-specific
+  code (`winreg`, `ctypes.windll`, `subprocess.DETACHED_PROCESS`, …) with a
+  `sys.platform == "win32"` check ty can narrow on, and run
+  `ty check --python-platform linux` after touching it on Windows.
 - Mixed LF/CRLF in the tree; when doing literal replacements from scripts, allow `\r\n`.

@@ -82,6 +82,8 @@ _CHROMIUM_EXES = ("msedge.exe", "chrome.exe", "brave.exe", "chromium.exe", "viva
 
 def _default_browser_windows() -> str | None:
     """Executable of the user's default browser on Windows when it is Chromium-based."""
+    if sys.platform != "win32":
+        return None
     try:
         import shlex
         import winreg
