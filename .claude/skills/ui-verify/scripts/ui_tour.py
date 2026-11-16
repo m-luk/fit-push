@@ -95,6 +95,8 @@ def main() -> int:
 
             step("open the run from the list", open_run)
             tour("next")
+            title("Your tiles")
+            tour("next")
 
             def hover_and_drag() -> None:
                 title("Data streams")

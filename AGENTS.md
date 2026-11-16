@@ -126,6 +126,8 @@ app/
   modules.py      module discovery, manifest validation, isolated loading, /api/modules, /m/<id>/*
   paths.py        data directory, legacy migration, backups/restore
   parsers.py, analytics.py, laps.py, segments.py, writers.py, sports.py, storage.py
+  ski.py          uphill/downhill legs of ski activities (lifts/runs, climbs/descents),
+                  computed per request in Core.analysis (not stored)
   static/         index.html, app.js (core UI + window.fitpush SDK), style.css
 modules/
   RULES.md, README.md, INDEX.md (generated), _template/, <id>/ (one folder per module)
@@ -181,7 +183,13 @@ Use the **ui-development** skill for any change under `app/static/`, and the
 - Colours from CSS tokens (light **and** dark); `css("--token")` in JS.
 - One y-axis per chart; fixed colour per metric; text in text tokens.
 - No `prompt()`/`alert()`; use `askName()` / `toast()`.
-- View state in the URL hash; per-viewer preferences in `localStorage` (try/catch).
+- View state in the URL hash; small per-viewer conveniences in `localStorage` (try/catch).
+  Preferences that must survive a restart (map defaults, tiles per sport) go to
+  `/api/preferences` (the database): the desktop app may start on another port, which is
+  another browser origin with an empty `localStorage`. Preferences never touch the
+  athlete settings, so saving them recalculates nothing.
+- Activity-page tiles: the catalogue (key → label/html) is `tileDefs` in app.js, the default
+  list per sport is `Sport.tiles` in `sports.py`. A new tile needs both.
 - Async renders guard every `await` with the render token; dispose maps (and module
   cleanups) before replacing the page; no animated programmatic map moves.
 - `window.fitpush` is a public contract (docs/SDK.md): extend, don't break.

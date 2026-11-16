@@ -7,7 +7,7 @@ Interactive documentation is served at `/docs` while the app runs.
 |---|---|---|
 | `POST` | `/api/activities` | multipart upload (`files`, repeatable) |
 | `GET` | `/api/activities?sport=&tag=` | list with summaries and tags |
-| `GET` | `/api/activities/{id}?split=km\|mi` | full analysis: summary, series, track, splits, zones, power curve, best efforts, laps, segment efforts, tags |
+| `GET` | `/api/activities/{id}?split=km\|mi` | full analysis: summary, series, track, splits, zones, power curve, best efforts, laps, segment efforts, tags, `ski` (skiing / ski touring only: uphill and downhill legs with stats and totals, else `null`) |
 | `GET` | `/api/activities/{id}?start=&end=` | temporary trimmed view (point indices, inclusive; nothing is saved) |
 | `GET` | `/api/activities/{id}/export?format=gpx\|tcx\|fit&start=&end=` | download full activity or trimmed section as a new file |
 | `POST` | `/api/activities/{id}/clip` | `{start, end, name?}`: save section as new activity |
@@ -24,6 +24,7 @@ Interactive documentation is served at `/docs` while the app runs.
 | `POST` | `/api/segments/{id}/rescan` | re-match against every stored activity |
 | `GET` | `/api/stats?sport=&period=week\|month` | totals, periods, records, all-time power curve |
 | `GET/PUT` | `/api/settings` | `{max_hr, rest_hr, ftp}` |
+| `GET/PUT` | `/api/preferences` | display defaults `{map_overlay, map_palette, map_reverse, tiles: {sport: [tile keys]}}`; PUT merges, `tiles: {sport: null}` restores a sport's default tiles |
 | `GET` | `/api/sports` | sport catalogue |
 | `GET` | `/api/tutorial` | `{activity_id, activities}`: is the tutorial run present |
 | `POST` | `/api/tutorial` | create (or reuse) the tutorial run: `{activity_id, created}` |

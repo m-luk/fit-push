@@ -40,6 +40,33 @@ Per activity:
 - best efforts (fastest 400 m … marathon for running; 5–100 km for cycling)
 - charts that share one hover position (elevation, pace/speed, HR, power, cadence, temperature), with the hovered point marked on the map
 
+The **summary tiles** at the top of an activity depend on the sport: pace and
+cadence for running, power and TSS for cycling, runs and vertical for skiing, and
+so on. **⚙ Customize** (after the tiles) picks and orders them; the choice is saved
+for that sport and applies to all its activities. **Reset to defaults** brings back
+the sport's own set. A tile with no data in an activity is left out.
+
+## Skiing and ski touring
+
+Skiing activities are split into **uphill** and **downhill** legs from the
+elevation profile. The profile is cut where it turns, and only swings of 30 m or
+more count, so noise and short rises inside a run don't split it. Each leg's flat
+ends (a lift queue, a summit break) are trimmed off.
+
+- **Skiing** (resort): uphill legs are **lift rides**, downhill legs are **runs**.
+  Time on neither is shown as *waiting & breaks*.
+- **Ski touring**: uphill legs are **climbs**, downhill legs are **descents**;
+  breaks and transitions are counted separately.
+
+The **Runs & lifts** / **Climbs & descents** card compares the two sides: count,
+time and share of the activity, distance, vertical, vertical rate (m/h), average
+and max speed, heart rate, longest and biggest leg. Below it, every leg is listed
+with its start, time, distance, vertical, rate, speed and grade. Filter the list
+with **All / Lift rides / Runs**, click a row (or use ↑/↓) to select that leg on the
+charts and the map, then view it, cut it or save it like any selection. The map
+can colour the track by **Lifts / runs** (or **Climbs / descents**), and the
+elevation chart shades the legs.
+
 ## Trimming and cutting
 
 Drag across any chart to select a section. The selection is highlighted on
@@ -96,6 +123,12 @@ last lap's end. It adds:
 - **✚ Pick section**: click the start, then the end of a stretch on the track to
   select it (where the track passes a spot several times, the first pass after
   the previous click is used).
+- Every activity opens with the colouring chosen in **Settings → Map on activity
+  pages** (measure, colour pattern, reversed). The controls on the map change only
+  the activity you are looking at. If that measure isn't in an activity, it shows
+  the plain route.
+- Pinch on a trackpad (or touch screen) to zoom the map; the mouse wheel zooms only
+  the enlarged map, so the page still scrolls normally.
 
 ## Segments
 
@@ -125,7 +158,8 @@ elevation, training load, count), personal records per sport, and an all-time
 power curve.
 
 Athlete settings (max HR, resting HR, FTP) drive zones, TRIMP, IF and TSS.
-Saving new settings recalculates every stored activity.
+Changing them recalculates every stored activity. Map defaults and tile choices
+are display preferences; saving them recalculates nothing.
 
 ## Tags
 
