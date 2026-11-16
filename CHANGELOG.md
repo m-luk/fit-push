@@ -12,7 +12,9 @@ How to update it: see "Changelog" in `AGENTS.md`.
 
 - The desktop app opens fit-push in its own window with the fit-push name and icon (app
   mode of Edge, Chrome or Brave) instead of a browser tab; `--no-app-window` keeps the
-  tab. The window's title bar follows the light/dark theme.
+  tab. The window's title bar follows the light/dark theme. Closing the window stops
+  fit-push (`--no-stop-with-window` keeps it running). On Windows the window has its own
+  taskbar button, and pinning it gives a fit-push icon that starts fit-push again.
 - Developers can add a **fit-push (dev)** launcher to the Start menu / app menu with
   `python scripts/devapp.py install`: it starts the working copy with auto-reload and
   opens the browser, like the desktop app.

@@ -66,7 +66,13 @@ defaults: open the browser, reuse a running instance (`GET /api/version`), fall 
 free port when 8000 is taken, keep the window open on a start-up error. The browser is
 opened as an app window (`--app=URL` of the default browser if it is Chromium-based, else
 Edge/Chrome/Brave/Chromium; `--no-app-window` for a tab), which takes its name and icon
-from the page title and `app/static/manifest.json`.
+from the page title and `app/static/manifest.json`. On Windows `app/taskbar.py` finds that
+window (a Chromium window titled exactly `fit-push`, the page `<title>`) and sets its
+AppUserModel ID and relaunch properties: it gets its own taskbar button, and a pin shows the
+fit-push icon and runs the launcher (`fit-push.exe`, or `devapp.py launch` from source)
+instead of the browser. The server watches those windows and, once the last one has been
+closed for a few seconds, stops itself like Ctrl+C in its console (`--no-stop-with-window`
+keeps it running).
 
 ```bash
 pip install -r requirements-release.txt   # PyInstaller + Pillow (for the icon)

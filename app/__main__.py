@@ -117,30 +117,50 @@ def app_browser() -> str | None:
     return None
 
 
-def open_url(url: str, app_window: bool) -> None:
-    """Open the app in its own browser window (fit-push name and icon), else in a browser tab."""
+def open_url(url: str, app_window: bool) -> bool:
+    """Open the app in its own browser window (fit-push name and icon), else in a browser tab.
+
+    Returns True when an app window was opened.
+    """
     if app_window and (exe := app_browser()):
+        # Detached from our console: stopping the server with a console Ctrl+C must not reach the browser.
+        flags = (subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP) if sys.platform == "win32" else 0
         try:
             subprocess.Popen(
                 [exe, f"--app={url}"],
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
-                start_new_session=True,
+                start_new_session=sys.platform != "win32",
+                creationflags=flags,
             )
-            return
+            return True
         except OSError:
             pass
     webbrowser.open(url)
+    return False
 
 
-def _open_when_ready(host: str, port: int, url: str, app_window: bool, wait: float = 60.0) -> None:
-    end = time.monotonic() + wait
+def _open_when_ready(host: str, port: int, url: str, app_window: bool, stop_with_window: bool) -> None:
+    from . import taskbar
+
+    end = time.monotonic() + 60.0
     while time.monotonic() < end:
         if running_instance(host, port, timeout=0.5):
-            open_url(url, app_window)
+            if open_url(url, app_window):
+                # own taskbar button + pin that relaunches fit-push; stop when the last window closes
+                watched = stop_with_window and taskbar.watch_app_windows(_stopped_with_window)
+                if not watched:
+                    taskbar.tag_app_windows()
             return
         time.sleep(0.25)
+
+
+def _stopped_with_window() -> None:
+    from . import taskbar
+
+    print("fit-push window closed: stopping the server", flush=True)
+    taskbar.stop_server()
 
 
 def parser() -> argparse.ArgumentParser:
@@ -169,6 +189,12 @@ def parser() -> argparse.ArgumentParser:
         action=argparse.BooleanOptionalAction,
         default=True,
         help="open fit-push in its own window (Edge, Chrome or Brave app mode) instead of a browser tab",
+    )
+    ap.add_argument(
+        "--stop-with-window",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="stop the server when the last fit-push app window is closed (Windows)",
     )
     ap.add_argument("--data-dir", help=f"data directory (default: {paths.default_data_dir()})")
     ap.add_argument("--db", help="database file (default: <data dir>/activities.db)")
@@ -216,8 +242,10 @@ def main(argv: list[str] | None = None) -> int:
         # Double-clicking the app again just brings the running one up.
         if running_instance(host, port):
             print(f"fit-push is already running at http://{host}:{port}")
-            if open_browser:
-                open_url(f"http://{host}:{port}/", args.app_window)
+            if open_browser and open_url(f"http://{host}:{port}/", args.app_window):
+                from . import taskbar
+
+                taskbar.tag_app_windows()  # the running server's watcher counts this window too
             return 0
         if not port_free(host, port):
             port = free_port(host)
@@ -228,7 +256,9 @@ def main(argv: list[str] | None = None) -> int:
     print(f"database: {db}")
     print(f"fit-push {__version__} running at {url}" + ("  (close this window to stop)" if desktop else ""))
     if open_browser:
-        threading.Thread(target=_open_when_ready, args=(host, port, url, args.app_window), daemon=True).start()
+        threading.Thread(
+            target=_open_when_ready, args=(host, port, url, args.app_window, args.stop_with_window), daemon=True
+        ).start()
 
     import uvicorn
 

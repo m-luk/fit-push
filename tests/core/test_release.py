@@ -97,12 +97,53 @@ def test_open_url_uses_app_window_or_falls_back_to_a_tab(monkeypatch):
     monkeypatch.setattr(launcher.webbrowser, "open", tabs.append)
     monkeypatch.setattr(launcher.subprocess, "Popen", lambda cmd, **kw: started.append(cmd))
     monkeypatch.setattr(launcher, "app_browser", lambda: "/x/chrome")
-    launcher.open_url("http://h:1/", app_window=True)
+    assert launcher.open_url("http://h:1/", app_window=True) is True
     assert started == [["/x/chrome", "--app=http://h:1/"]] and not tabs
-    launcher.open_url("http://h:1/", app_window=False)
+    assert launcher.open_url("http://h:1/", app_window=False) is False
     monkeypatch.setattr(launcher, "app_browser", lambda: None)
-    launcher.open_url("http://h:1/", app_window=True)
+    assert launcher.open_url("http://h:1/", app_window=True) is False
     assert tabs == ["http://h:1/", "http://h:1/"] and len(started) == 1
+
+
+def _fake_clock(monkeypatch, step: float = 0.5):
+    from app import taskbar
+
+    now = [0.0]
+    monkeypatch.setattr(taskbar.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(taskbar.time, "sleep", lambda s: now.__setitem__(0, now[0] + step))
+    return taskbar
+
+
+def test_window_watcher_stops_after_the_last_window_closes(monkeypatch):
+    taskbar = _fake_clock(monkeypatch)
+    frames = iter([[], [7], [7, 8], [8], [], [9]] + [[]] * 100)  # a reload blip ([] then [9]) is not a close
+    monkeypatch.setattr(taskbar, "_app_windows", lambda: next(frames))
+    tagged: list[int] = []
+    monkeypatch.setattr(taskbar, "_set_identity", lambda hwnd, ident: tagged.append(hwnd))
+    closed: list[bool] = []
+    ident = taskbar.Identity("fit-push.dev", "cmd", "fit-push (dev)", None)
+    taskbar._watch_loop(ident, lambda: closed.append(True), grace=4.0, appear=60.0)
+    assert closed == [True]
+    assert tagged == [7, 8, 9]  # every new window once
+
+
+def test_window_watcher_does_nothing_when_no_window_appears(monkeypatch):
+    taskbar = _fake_clock(monkeypatch)
+    monkeypatch.setattr(taskbar, "_app_windows", list)
+    closed: list[bool] = []
+    taskbar._watch_loop(None, lambda: closed.append(True), grace=4.0, appear=10.0)
+    assert closed == []
+
+
+def test_taskbar_identity_from_source(monkeypatch):
+    from app import taskbar
+
+    monkeypatch.setenv("FITPUSH_RELAUNCH", "py devapp.py launch --core-only")
+    ident = taskbar.identity()
+    assert ident and ident.app_id == "fit-push.dev" and ident.command == "py devapp.py launch --core-only"
+    monkeypatch.delenv("FITPUSH_RELAUNCH")
+    ident = taskbar.identity()
+    assert ident and ident.command.endswith("devapp.py launch")
 
 
 def test_manifest_is_served(client):

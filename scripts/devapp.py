@@ -118,8 +118,10 @@ def launch(extra: list[str]) -> int:
 
         ctypes.windll.kernel32.SetConsoleTitleW(NAME)
     cmd = [sys.executable, str(ROOT / "scripts" / "run.py"), "--reload", "--desktop", *extra]
+    # a pinned fit-push window relaunches exactly this (see app/taskbar.py)
+    env = {**os.environ, "FITPUSH_RELAUNCH": subprocess.list2cmdline([sys.executable, __file__, "launch", *extra])}
     try:
-        code = subprocess.call(cmd, cwd=ROOT)
+        code = subprocess.call(cmd, cwd=ROOT, env=env)
     except KeyboardInterrupt:
         return 0
     if code not in (0, 130) and sys.stdin and sys.stdin.isatty():
