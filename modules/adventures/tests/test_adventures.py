@@ -226,3 +226,44 @@ def test_deleting_forgets_dismissals_of_its_activities(make_client):
     client.delete(f"{API}/adventures/{adv['id']}")
     assert [x["key"] for x in client.get(f"{API}/suggestions").json()] == [key]
     assert client.post(f"{API}/suggestions/reset").json() == {"restored": 1}  # only the unrelated one was left
+
+
+def test_tiles_per_type_and_per_adventure(make_client):
+    client = make_client(modules="adventures")
+    ids = traverse(client)
+    a = client.post(f"{API}/adventures", json={"name": "A", "type": "traverse", "activity_ids": ids[:2]}).json()
+    b = client.post(f"{API}/adventures", json={"name": "B", "type": "traverse", "activity_ids": ids[2:]}).json()
+    assert a["tiles"]["source"] == "default" and "fastest_day" in a["tiles"]["keys"]
+    assert set(a["tiles"]["keys"]) <= set(a["tile_keys"]) and a["avg_hr"] > 100
+    put = lambda adv, **body: client.put(f"{API}/adventures/{adv['id']}/tiles", json=body)  # noqa: E731
+    get = lambda adv: client.get(f"{API}/adventures/{adv['id']}").json()["tiles"]  # noqa: E731
+    # defaults for every traverse
+    assert put(a, keys=["distance", "highest", "distance"], scope="type").json() == {
+        "keys": ["distance", "highest"],
+        "source": "type",
+    }
+    assert get(b) == {"keys": ["distance", "highest"], "source": "type"}
+    # just this adventure
+    put(b, keys=["days", "avg_hr"])
+    assert get(b) == {"keys": ["days", "avg_hr"], "source": "adventure"}
+    assert get(a)["keys"] == ["distance", "highest"]
+    # a multi-day adventure keeps its own type's defaults
+    client.patch(f"{API}/adventures/{a['id']}", json={"type": "multiday"})
+    assert get(a)["source"] == "default" and "avg_act_distance" in get(a)["keys"]
+    # resets: this adventure back to its type, then the type back to the built-in tiles
+    put(b, keys=None)
+    assert get(b)["source"] == "type"
+    put(b, keys=None, scope="type")
+    assert get(b)["source"] == "default"
+    tiles = client.get(f"{API}/tiles").json()
+    assert tiles["types"]["traverse"] == tiles["builtin"]["traverse"]
+    # saving as the type default drops the adventure's own choice
+    put(b, keys=["days"])
+    put(b, keys=["moving"], scope="type")
+    assert get(b) == {"keys": ["moving"], "source": "type"}
+    assert put(b, keys=["nope"]).status_code == 422
+    assert put(b, keys=[]).status_code == 422
+    assert client.put(f"{API}/adventures/9999/tiles", json={"keys": ["days"]}).status_code == 404
+    client.delete(f"{API}/adventures/{b['id']}")
+    # detection settings keep working next to the stored tile defaults
+    assert client.get(f"{API}/settings").json()["min_days"] == 2

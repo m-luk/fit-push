@@ -21,7 +21,9 @@ How to update it: see "Changelog" in `AGENTS.md`.
   lets its activities be proposed again. A traverse must be one continuous line (each
   start within 1 km of the previous end, mostly point-to-point); other trips are
   multi-day. Tiles show the highest point, the longest day and the biggest climb, and the
-  map can also be coloured by elevation, speed or heart rate.
+  map can also be coloured by elevation, speed or heart rate. **⚙ Customize** picks and
+  orders the tiles like on an activity, as the default for traverses or multi-day trips
+  or just for one adventure.
 - Module developers: **service modules** (`--provides service`) and versioned services
   (SDK 1.3). Providers declare `services` with versions and document them in a README
   `## Services` section; consumers declare `uses` with the major version they need and

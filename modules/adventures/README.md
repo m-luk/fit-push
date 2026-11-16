@@ -51,6 +51,11 @@ Endpoints (under `/api/m/adventures`):
   fastest/slowest day, averages per day and per activity; `PATCH` `{name, type, notes}`;
   `PUT /adventures/{id}/activities` `{activity_ids}`; `DELETE` (keeps the activities and
   forgets dismissed proposals that contain any of them, so they can be proposed again).
+- `PUT /adventures/{id}/tiles` `{keys, scope}`: choose and order the summary tiles,
+  `scope: "adventure"` for this adventure only or `"type"` as the default of its type
+  (which also drops this adventure's own choice); `keys: null` goes back to the defaults
+  of that scope. `GET /adventures/{id}` returns `tiles: {keys, source}` (`adventure`,
+  `type` or `default`) and every `tile_keys`; `GET /tiles` the defaults per type.
 - `GET /activities?from=&to=`: compact activity list for the "add activities" picker.
 - `GET /tracks?ids=1,2`: GPS lines for the map preview of an unfolded proposal
   (proposals also carry `activities` with id, name, sport, start time and distance).
@@ -70,4 +75,6 @@ on activity pages links to the adventures the activity belongs to.
 Reads activities, summaries, tags and thinned GPS tracks through `ctx.core`. Stores
 `m_adventures_adventures` (id, name, type, notes, created_at),
 `m_adventures_members` (adventure_id, activity_id), `m_adventures_settings`
-(key, JSON value) and `m_adventures_dismissed` (proposal key = sorted activity ids).
+(key, JSON value; `tiles` holds the tile defaults per type), `m_adventures_dismissed`
+(proposal key = sorted activity ids) and `m_adventures_tiles` (adventure_id, its own
+tile keys).

@@ -35,8 +35,13 @@ left out unless you change that.
 3. To build one by hand, click **New adventure**, enter a name, then tick the activities
    in the list that opens. Change **from** / **to** to see other dates, and click
    **Save**.
-4. In an adventure, the tiles show the totals, the **Highest point**, the **Longest day**
-   and the **Biggest climb** (most elevation gain in one day). **Colour by** switches the
+4. In an adventure, the tiles show the totals, the **Highest point**, the **Longest day**,
+   the **Biggest climb** (most elevation gain in one day), the fastest and slowest day and
+   averages. Click a day tile to show that day on the map. **⚙ Customize** after the
+   tiles picks and orders them: tick the tiles, use ↑ ↓, and under **Save for** choose
+   **this adventure only** or **every traverse / multi-day adventure** (the default for
+   that type). **Reset** goes back to the type's tiles (for one adventure) or to the
+   standard tiles (for the type). **Colour by** switches the
    map between **Activity** (each activity its own colour, in day order), **Day** (one
    colour per day) and **Total** (the whole route in one colour), or, like the activity
    map, colours the route by **Elevation**, **Speed** (**Pace** for running and walking) or

@@ -70,6 +70,30 @@ class MembersIn(BaseModel):
     activity_ids: list[int] = Field(max_length=1000)
 
 
+# Summary tiles of the adventure view. The frontend renders them; the backend keeps the
+# choice: defaults per adventure type, optionally replaced for one adventure.
+TILE_KEYS = (
+    "distance", "moving", "elapsed", "elev_gain", "avg_speed", "avg_hr", "days", "span",
+    "activities", "highest", "longest_day", "biggest_climb", "fastest_day", "slowest_day",
+    "avg_day_distance", "avg_day_moving", "avg_day_elev", "avg_act_distance", "avg_act_moving",
+)  # fmt: skip
+DEFAULT_TILES = {
+    "traverse": [
+        "distance", "moving", "elev_gain", "avg_speed", "days", "activities", "highest",
+        "longest_day", "biggest_climb", "fastest_day", "slowest_day", "avg_day_distance",
+    ],
+    "multiday": [
+        "distance", "moving", "elev_gain", "days", "activities", "highest", "biggest_climb",
+        "longest_day", "avg_day_distance", "avg_day_elev", "avg_act_distance",
+    ],
+}  # fmt: skip
+
+
+class TilesIn(BaseModel):
+    keys: list[str] | None = Field(default=None, max_length=len(TILE_KEYS))  # None: back to the defaults
+    scope: Literal["adventure", "type"] = "adventure"
+
+
 class KeyIn(BaseModel):
     key: str = Field(min_length=1, max_length=20_000)
 
@@ -101,6 +125,13 @@ def stats(rows: list[dict]) -> dict:
     }
 
 
+def avg_hr(rows: list[dict]) -> float | None:
+    """Heart rate averaged over the activities that have one, weighted by moving time."""
+    hr = [(r["avg_hr"], r["moving_s"]) for r in rows if r.get("avg_hr") and r["moving_s"] > 0]
+    total = sum(t for _, t in hr)
+    return sum(h * t for h, t in hr) / total if total else None
+
+
 def register(ctx: ModuleContext) -> None:
     ctx.db.script(f"""
         CREATE TABLE IF NOT EXISTS {ctx.db.table("adventures")} (
@@ -110,10 +141,11 @@ def register(ctx: ModuleContext) -> None:
             adventure_id INTEGER NOT NULL, activity_id INTEGER NOT NULL, PRIMARY KEY (adventure_id, activity_id));
         CREATE INDEX IF NOT EXISTS {ctx.db.table("members_act")} ON {ctx.db.table("members")} (activity_id);
         CREATE TABLE IF NOT EXISTS {ctx.db.table("settings")} (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-        CREATE TABLE IF NOT EXISTS {ctx.db.table("dismissed")} (key TEXT PRIMARY KEY)
+        CREATE TABLE IF NOT EXISTS {ctx.db.table("dismissed")} (key TEXT PRIMARY KEY);
+        CREATE TABLE IF NOT EXISTS {ctx.db.table("tiles")} (adventure_id INTEGER PRIMARY KEY, keys TEXT NOT NULL)
     """)
     adv_t, mem_t = ctx.db.table("adventures"), ctx.db.table("members")
-    set_t, dis_t = ctx.db.table("settings"), ctx.db.table("dismissed")
+    set_t, dis_t, tiles_t = ctx.db.table("settings"), ctx.db.table("dismissed"), ctx.db.table("tiles")
 
     ends_cache: dict[int, tuple[list[float], list[float]] | None] = {}  # id -> (start, end); points never change
     tracks: dict[int, list] = {}
@@ -125,6 +157,7 @@ def register(ctx: ModuleContext) -> None:
         profiles.pop(activity_id, None)
         ctx.db.execute(f"DELETE FROM {mem_t} WHERE activity_id = ?", (activity_id,))
         ctx.db.execute(f"DELETE FROM {adv_t} WHERE id NOT IN (SELECT DISTINCT adventure_id FROM {mem_t})")
+        ctx.db.execute(f"DELETE FROM {tiles_t} WHERE adventure_id NOT IN (SELECT id FROM {adv_t})")
 
     ctx.on("activity.deleted", on_deleted)
 
@@ -173,6 +206,21 @@ def register(ctx: ModuleContext) -> None:
             line = track(aid)
             ends_cache[aid] = (line[0], line[-1]) if len(line) >= 2 else None
         return ends_cache[aid]
+
+    def type_tiles() -> dict[str, list[str]]:
+        """Tile defaults per adventure type: the user's choice, else the built-in ones."""
+        rows = ctx.db.query(f"SELECT value FROM {set_t} WHERE key = 'tiles'")
+        saved = json.loads(rows[0]["value"]) if rows else {}
+        return {t: saved.get(t) or list(DEFAULT_TILES[t]) for t in TYPES}
+
+    def tiles_of(adv: dict) -> dict:
+        """The tiles an adventure shows and where they come from (adventure / type / default)."""
+        own = ctx.db.query(f"SELECT keys FROM {tiles_t} WHERE adventure_id = ?", (adv["id"],))
+        if own:
+            return {"keys": json.loads(own[0]["keys"]), "source": "adventure"}
+        rows = ctx.db.query(f"SELECT value FROM {set_t} WHERE key = 'tiles'")
+        saved = (json.loads(rows[0]["value"]) if rows else {}).get(adv["type"])
+        return {"keys": saved or list(DEFAULT_TILES[adv["type"]]), "source": "type" if saved else "default"}
 
     def settings() -> dict:
         out = dict(DEFAULTS)
@@ -415,6 +463,9 @@ def register(ctx: ModuleContext) -> None:
                 else None,
                 "avg_per_day": {k: out[k] / n_days for k in keys},
                 "avg_per_activity": {k: out[k] / n_acts for k in keys},
+                "avg_hr": avg_hr(rows),
+                "tiles": tiles_of(adv),
+                "tile_keys": list(TILE_KEYS),
             }
         )
         return out
@@ -433,6 +484,38 @@ def register(ctx: ModuleContext) -> None:
         set_members(adv_id, body.activity_ids)
         return detail(adv_id)
 
+    @ctx.router.put("/adventures/{adv_id}/tiles")
+    def put_tiles(adv_id: int, body: TilesIn) -> dict:
+        """Choose and order the tiles: for this adventure (``scope: adventure``), or as the
+        default of its type (``scope: type``, which also drops this adventure's own choice).
+        ``keys: null`` goes back to the defaults of that scope."""
+        adv = adventure(adv_id)
+        if body.keys is not None:
+            bad = [k for k in body.keys if k not in TILE_KEYS]
+            if bad or not body.keys:
+                raise Invalid(f"unknown tiles: {', '.join(bad)}" if bad else "choose at least one tile")
+        keys = list(dict.fromkeys(body.keys)) if body.keys is not None else None
+        if body.scope == "adventure":
+            if keys is None:
+                ctx.db.execute(f"DELETE FROM {tiles_t} WHERE adventure_id = ?", (adv_id,))
+            else:
+                ctx.db.execute(
+                    f"INSERT OR REPLACE INTO {tiles_t} (adventure_id, keys) VALUES (?, ?)", (adv_id, json.dumps(keys))
+                )
+        else:
+            rows = ctx.db.query(f"SELECT value FROM {set_t} WHERE key = 'tiles'")
+            saved = json.loads(rows[0]["value"]) if rows else {}
+            saved[adv["type"]] = keys
+            saved = {t: v for t, v in saved.items() if v}
+            ctx.db.execute(f"INSERT OR REPLACE INTO {set_t} (key, value) VALUES ('tiles', ?)", (json.dumps(saved),))
+            ctx.db.execute(f"DELETE FROM {tiles_t} WHERE adventure_id = ?", (adv_id,))
+        return tiles_of(adventure(adv_id))
+
+    @ctx.router.get("/tiles")
+    def get_tiles() -> dict:
+        """Tile defaults per type and every tile key."""
+        return {"types": type_tiles(), "builtin": DEFAULT_TILES, "keys": list(TILE_KEYS)}
+
     @ctx.router.delete("/adventures/{adv_id}", status_code=204)
     def delete(adv_id: int) -> None:
         """Remove an adventure; its activities are kept and can be proposed again (also
@@ -443,6 +526,7 @@ def register(ctx: ModuleContext) -> None:
             if freed & {int(i) for i in r["key"].split(",") if i.isdigit()}:
                 ctx.db.execute(f"DELETE FROM {dis_t} WHERE key = ?", (r["key"],))
         ctx.db.execute(f"DELETE FROM {mem_t} WHERE adventure_id = ?", (adv_id,))
+        ctx.db.execute(f"DELETE FROM {tiles_t} WHERE adventure_id = ?", (adv_id,))
         ctx.db.execute(f"DELETE FROM {adv_t} WHERE id = ?", (adv_id,))
 
     # ---- preview tracks --------------------------------------------------------------------

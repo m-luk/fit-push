@@ -18,7 +18,6 @@
   const dist = (m, d = 1) => `${esc(sdk.fmt.dist(m || 0, d))} ${U().distL}`;
   const plural = (n, w, pl = `${w}s`) => `${n} ${n === 1 ? w : pl}`;
   const nActs = (n) => plural(n, "activity", "activities");
-  const tile = (label, value, unit = "") => `<div class="tile"><div class="label">${esc(label)}</div><div class="value">${value}${unit ? `<span class="unit">${esc(unit)}</span>` : ""}</div></div>`;
   // Speed or pace: pace only when every sport of the adventure is a pace sport.
   const speedFmt = (sports) => (sports.length && sports.every((s) => sdk.sports.isPace(s))
     ? { f: (ms) => sdk.fmt.pace(ms), unit: `/${U().distL}`, label: "Avg pace" }
@@ -218,9 +217,19 @@
           <span class="seg" role="group" aria-label="Colour by a measure"><button type="button" data-color="ele">Elevation</button><button type="button" data-color="speed" id="adv-speed-btn">Speed</button><button type="button" data-color="hr">Heart rate</button></span>
           <span class="adv-days" id="adv-days" role="group" aria-label="Show day"></span></div>
         <div id="adv-map" class="adv-map"></div></div>
-      <div class="adv-hl" id="adv-hl"></div>
       <div class="card adv-perday-card"><h2><span>Per day</span><span class="muted adv-small">click a day to show it on the map</span></h2><div class="table-scroll" id="adv-perday"></div></div>
-      <div class="card"><h2><span>Activities</span></h2><div class="table-scroll" id="adv-acts"></div></div>`;
+      <div class="card"><h2><span>Activities</span></h2><div class="table-scroll" id="adv-acts"></div></div>
+      <dialog class="wide adv-tiles-dialog" id="adv-tiles-dialog" aria-labelledby="adv-tiles-title"><form method="dialog">
+        <h2 id="adv-tiles-title">Adventure tiles</h2>
+        <p class="muted">Tick the tiles to show and use ↑ ↓ to order them. A tile without data is left out. <span id="adv-tiles-source"></span></p>
+        <ul class="tile-pick" id="adv-tile-pick"></ul>
+        <fieldset class="adv-tiles-scope"><legend>Save for</legend>
+          <label class="adv-check"><input type="radio" name="scope" value="adventure" checked> <span>this adventure only</span></label>
+          <label class="adv-check"><input type="radio" name="scope" value="type"> <span>every <b id="adv-tiles-type"></b> adventure (the default)</span></label></fieldset>
+        <div class="dialog-actions">
+          <button value="reset" class="btn ghost push-left" formnovalidate id="adv-tiles-reset">Reset</button>
+          <button value="cancel" class="btn ghost" formnovalidate>Cancel</button>
+          <button value="save" class="btn primary">Save</button></div></form></dialog>`;
     const $ = (s) => el.querySelector(s);
     const map = sdk.map($("#adv-map"));
     const layer = L.layerGroup().addTo(map);
@@ -268,14 +277,7 @@
         ? `${typeBadge(adv.type)} ${esc(span(adv.first_day, adv.last_day))} · ${plural(adv.days, "active day")} of ${adv.span_days} · ${sportIcons(adv.sports)}`
         : `${typeBadge(adv.type)} No activities yet: use <b>Edit activities</b>.`;
       if (st.color in METRIC && !hasMetric(st.color)) st.color = "activity";
-      const longest = adv.per_day.length ? adv.per_day.reduce((x, y) => (y.distance_m > x.distance_m ? y : x)) : null;
-      const climb = adv.per_day.find((d) => d.date === adv.biggest_climb_day);
-      $("#adv-tiles").innerHTML = tile("Distance", esc(sdk.fmt.dist(adv.distance_m, 1)), U().distL) + tile("Moving time", esc(sdk.fmt.dur(adv.moving_s)))
-        + tile("Elevation gain", esc(sdk.fmt.ele(adv.elev_gain_m)), U().eleL) + tile(sp.label, esc(sp.f(adv.avg_speed_ms)), sp.unit)
-        + tile("Days", `${adv.days}<span class="unit">/ ${adv.span_days}</span>`) + tile("Activities", String(adv.activities))
-        + (adv.highest_point ? tile("Highest point", esc(sdk.fmt.ele(adv.highest_point.ele_m)), U().eleL) : "")
-        + (longest ? tile("Longest day", esc(sdk.fmt.dist(longest.distance_m, 1)), U().distL) : "")
-        + (climb ? tile("Biggest climb", esc(sdk.fmt.ele(climb.elev_gain_m)), U().eleL) : "");
+      drawTiles(sp);
       if (st.day && !adv.per_day.some((d) => d.day === st.day)) st.day = 0;
       $("#adv-days").innerHTML = adv.per_day.length > 1 ? [`<button type="button" class="adv-chip" data-day="0">All days</button>`]
         .concat(adv.per_day.map((d) => `<button type="button" class="adv-chip" data-day="${d.day}">Day ${d.day}</button>`)).join("") : "";
@@ -284,19 +286,99 @@
       syncState();
     }
 
+    // ---- summary tiles: a catalogue like the activity page's, chosen per type or per adventure
+    function tileDefs(sp) {
+      const u = U(), byDate = new Map(adv.per_day.map((d) => [d.date, d]));
+      const t = (label, value, unit, dd) => (value == null || value === "–" ? "" : `<div class="tile"${dd ? ` data-day="${dd.day}" role="button" tabindex="0" title="Show day ${dd.day} on the map"` : ""}><div class="label">${esc(label)}</div><div class="value">${value}${unit ? `<span class="unit">${unit}</span>` : ""}</div></div>`);
+      const dayTile = (label, date) => { const d = byDate.get(date); return d ? t(label, esc(sp.f(d.avg_speed_ms)), `${esc(sp.unit)} · day ${d.day}`, d) : ""; };
+      const longest = adv.per_day.length ? adv.per_day.reduce((x, y) => (y.distance_m > x.distance_m ? y : x)) : null;
+      const climb = byDate.get(adv.biggest_climb_day);
+      const n = (v) => (adv.activities ? v : null);
+      const defs = {
+        distance: ["Distance", () => t("Distance", n(esc(sdk.fmt.dist(adv.distance_m, 1))), u.distL)],
+        moving: ["Moving time", () => t("Moving time", n(esc(sdk.fmt.dur(adv.moving_s))))],
+        elapsed: ["Elapsed time", () => t("Elapsed time", n(esc(sdk.fmt.dur(adv.elapsed_s))))],
+        elev_gain: ["Elevation gain", () => t("Elevation gain", n(esc(sdk.fmt.ele(adv.elev_gain_m))), u.eleL)],
+        avg_speed: [sp.label, () => t(sp.label, adv.avg_speed_ms ? esc(sp.f(adv.avg_speed_ms)) : null, esc(sp.unit))],
+        avg_hr: ["Avg heart rate", () => t("Avg heart rate", adv.avg_hr ? String(Math.round(adv.avg_hr)) : null, "bpm")],
+        days: ["Active days", () => t("Days", n(String(adv.days)), `/ ${adv.span_days}`)],
+        span: ["Calendar days", () => t("Calendar days", n(String(adv.span_days)))],
+        activities: ["Activities", () => t("Activities", String(adv.activities))],
+        highest: ["Highest point", () => t("Highest point", adv.highest_point ? esc(sdk.fmt.ele(adv.highest_point.ele_m)) : null, u.eleL)],
+        longest_day: ["Longest day", () => (longest ? t("Longest day", esc(sdk.fmt.dist(longest.distance_m, 1)), `${u.distL} · day ${longest.day}`, longest) : "")],
+        biggest_climb: ["Biggest climb", () => (climb ? t("Biggest climb", esc(sdk.fmt.ele(climb.elev_gain_m)), `${u.eleL} · day ${climb.day}`, climb) : "")],
+        fastest_day: ["Fastest day", () => dayTile("Fastest day", adv.fastest_day)],
+        slowest_day: ["Slowest day", () => dayTile("Slowest day", adv.slowest_day)],
+        avg_day_distance: ["Distance per day", () => t("Distance per day", n(esc(sdk.fmt.dist(adv.avg_per_day.distance_m, 1))), u.distL)],
+        avg_day_moving: ["Moving time per day", () => t("Moving time per day", n(esc(sdk.fmt.dur(adv.avg_per_day.moving_s))))],
+        avg_day_elev: ["Elevation gain per day", () => t("Elevation gain per day", n(esc(sdk.fmt.ele(adv.avg_per_day.elev_gain_m))), u.eleL)],
+        avg_act_distance: ["Distance per activity", () => t("Distance per activity", n(esc(sdk.fmt.dist(adv.avg_per_activity.distance_m, 1))), u.distL)],
+        avg_act_moving: ["Moving time per activity", () => t("Moving time per activity", n(esc(sdk.fmt.dur(adv.avg_per_activity.moving_s))))],
+      };
+      return Object.fromEntries(adv.tile_keys.filter((k) => defs[k]).map((k) => [k, { label: defs[k][0], html: defs[k][1] }]));
+    }
+
+    function drawTiles(sp) {
+      const defs = tileDefs(sp);
+      const own = adv.tiles.source === "adventure";
+      $("#adv-tiles").innerHTML = adv.tiles.keys.map((k) => defs[k]?.html() || "").join("")
+        + `<button type="button" class="tile tile-edit" id="adv-tiles-btn" title="Choose the tiles of this adventure or of every ${esc(TYPES[adv.type][1].toLowerCase())} adventure"><span aria-hidden="true">⚙</span> Customize${own ? ' <span class="adv-small muted">(own)</span>' : ""}</button>`;
+    }
+
+    // Choose and order the tiles, for this adventure or as the default of its type.
+    function editTiles() {
+      const defs = tileDefs(speedFmt(adv.sports)), dlg = $("#adv-tiles-dialog"), list = $("#adv-tile-pick");
+      const chosen = adv.tiles.keys.filter((k) => defs[k]);
+      const order = [...chosen, ...Object.keys(defs).filter((k) => !chosen.includes(k))];
+      const on = new Set(chosen);
+      const typeName = TYPES[adv.type][1];
+      $("#adv-tiles-type").textContent = typeName.toLowerCase();
+      $("#adv-tiles-source").textContent = { adventure: "This adventure has its own tiles.", type: `This adventure uses your ${typeName.toLowerCase()} tiles.`, default: `This adventure uses the standard ${typeName.toLowerCase()} tiles.` }[adv.tiles.source];
+      dlg.querySelector(`[name=scope][value=${adv.tiles.source === "adventure" ? "adventure" : "type"}]`).checked = true;
+      const scope = () => dlg.querySelector("[name=scope]:checked").value;
+      const syncReset = () => { $("#adv-tiles-reset").textContent = scope() === "adventure" ? `Use the ${typeName.toLowerCase()} tiles` : "Reset to standard tiles"; };
+      const drawPick = (focusKey, dir) => {
+        list.innerHTML = order.map((k, i) => `<li data-key="${k}" class="${on.has(k) ? "" : "off"}">
+          <label><input type="checkbox" ${on.has(k) ? "checked" : ""}> ${esc(defs[k].label)}${defs[k].html() ? "" : ' <span class="nodata">(no data here)</span>'}</label>
+          <button type="button" class="btn small ghost" data-move="-1" aria-label="Move ${esc(defs[k].label)} up" ${i ? "" : "disabled"}>↑</button>
+          <button type="button" class="btn small ghost" data-move="1" aria-label="Move ${esc(defs[k].label)} down" ${i < order.length - 1 ? "" : "disabled"}>↓</button></li>`).join("");
+        if (focusKey) list.querySelector(`li[data-key="${focusKey}"] [data-move="${dir}"]:not([disabled])`)?.focus();
+      };
+      list.onchange = (e) => {
+        const li = e.target.closest("li");
+        if (!li) return;
+        if (e.target.checked) on.add(li.dataset.key); else on.delete(li.dataset.key);
+        li.classList.toggle("off", !e.target.checked);
+      };
+      list.onclick = (e) => {
+        const b = e.target.closest("[data-move]");
+        if (!b) return;
+        const key = b.closest("li").dataset.key, i = order.indexOf(key), j = i + Number(b.dataset.move);
+        if (j < 0 || j >= order.length) return;
+        [order[i], order[j]] = [order[j], order[i]];
+        drawPick(key, b.dataset.move);
+      };
+      dlg.onchange = (e) => { if (e.target.name === "scope") syncReset(); };
+      drawPick(); syncReset();
+      dlg.returnValue = "";
+      dlg.addEventListener("close", async () => {
+        if (!["save", "reset"].includes(dlg.returnValue)) return;
+        const keys = dlg.returnValue === "reset" ? null : order.filter((k) => on.has(k));
+        if (keys && !keys.length) { sdk.toast("Choose at least one tile"); return; }
+        try {
+          adv.tiles = await send(`/adventures/${id}/tiles`, "PUT", { keys, scope: scope() });
+          if (ctx.isStale()) return;
+          drawTiles(speedFmt(adv.sports));
+          sdk.toast(scope() === "type" ? `Tiles saved for every ${typeName.toLowerCase()} adventure` : keys ? "Tiles saved for this adventure" : `This adventure uses the ${typeName.toLowerCase()} tiles again`);
+        } catch (e) { sdk.toast(`Could not save: ${e.message}`); }
+      }, { once: true });
+      dlg.showModal();
+    }
+
     function drawTables(sp) {
       const { actC, dayC } = colors();
       const mark = (d) => [d.date === adv.fastest_day && "fastest", d.date === adv.slowest_day && "slowest", d.date === adv.longest_day && "longest", d.date === adv.shortest_day && "shortest"]
         .filter(Boolean).map((w) => `<span class="badge adv-mark">${w}</span>`).join(" ");
-      // highlights (fastest/slowest/longest day) and averages per day and per activity
-      const byDate = new Map(adv.per_day.map((d) => [d.date, d]));
-      const hl = (label, value, note, dd) => `<div class="adv-hl-item"${dd ? ` data-day="${dd.day}" role="button" tabindex="0"` : ""}><div class="adv-hl-label">${label}</div><div class="adv-hl-value">${value}</div><div class="muted adv-small">${note}</div></div>`;
-      const dayHl = (label, date, what) => { const d = byDate.get(date); return d ? hl(label, `Day ${d.day}`, `${esc(day(d.date))} · ${what(d)}`, d) : ""; };
-      const avgHl = (label, o) => hl(label, dist(o.distance_m), `${esc(sdk.fmt.dur(o.moving_s))} · ${esc(sdk.fmt.ele(o.elev_gain_m))} ${U().eleL}`);
-      const pace = (d) => `${esc(sp.f(d.avg_speed_ms))} ${esc(sp.unit)}`;
-      $("#adv-hl").innerHTML = adv.activities ? dayHl("Fastest day", adv.fastest_day, pace) + dayHl("Slowest day", adv.slowest_day, pace)
-        + avgHl("Average per day", adv.avg_per_day)
-        + avgHl("Average per activity", adv.avg_per_activity) : "";
       $("#adv-perday").innerHTML = adv.per_day.length ? `<table class="adv-table"><thead><tr><th>Day</th><th>Date</th><th class="num">Act.</th><th class="num">Distance (${U().distL})</th><th class="num">Moving</th><th class="num">Elev. (${U().eleL})</th><th class="num">${esc(sp.label.replace("Avg ", ""))} (${esc(sp.unit)})</th><th></th></tr></thead>
         <tbody>${adv.per_day.map((d) => `<tr data-day="${d.day}" tabindex="0" aria-selected="${d.day === st.day}"><td><span class="adv-sw" style="background:${dayC.get(d.day)}"></span>${d.day}</td><td>${esc(day(d.date))}</td><td class="num">${d.activities}</td>
           <td class="num">${esc(sdk.fmt.dist(d.distance_m, 1))}</td><td class="num">${esc(sdk.fmt.dur(d.moving_s))}</td><td class="num">${esc(sdk.fmt.ele(d.elev_gain_m))}</td><td class="num">${esc(sp.f(d.avg_speed_ms))}</td><td>${mark(d)}</td></tr>`).join("")}</tbody></table>` : '<p class="muted">–</p>';
@@ -380,6 +462,7 @@
       }
     });
     el.addEventListener("submit", async (ev) => {
+      if (ev.target.id !== "adv-pick-form") return; // the tiles dialog closes itself (method="dialog")
       ev.preventDefault();
       const box = $("#adv-picker"), ids = box.dataset.picked.split(",").filter(Boolean).map(Number);
       try {
@@ -395,6 +478,7 @@
     el.addEventListener("click", async (ev) => {
       const t = ev.target;
       try {
+        if (t.closest("#adv-tiles-btn")) { editTiles(); return; }
         const c = t.closest("[data-color]"), d = t.closest("[data-day]"), ty = t.closest("[data-type]");
         if (c) { st.color = c.dataset.color; drawTables(speedFmt(adv.sports)); drawMap(false); syncState(); }
         else if (d && !t.closest("a")) {
