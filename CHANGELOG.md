@@ -8,6 +8,15 @@ How to update it: see "Changelog" in `AGENTS.md`.
 
 ## [Unreleased]
 
+### Added
+
+- **Adventures** module: group activities into traverses (chained tracks) and multi-day
+  trips (outings from one base on consecutive days), with totals, a per-day table, the
+  fastest and slowest day, averages per day and per activity, and one map coloured by
+  activity, by day or as a single total line. It proposes adventures automatically;
+  sports, excluded tags (default `commute`), the allowed gap between days (default 1
+  day) and the traverse distance (default 10 km) can be changed.
+
 ## [0.4.0] - 2026-11-16
 
 ### Added

@@ -1,0 +1,12 @@
+{
+  "id": "adventures",
+  "name": "Adventures",
+  "version": "0.1.0",
+  "summary": "Group activities into adventures (traverses and multi-day trips) with totals, per-day stats and one map; proposes them automatically",
+  "owner": { "github": "m-luk" },
+  "maintainers": [],
+  "sdk": "1",
+  "provides": ["page", "activity-card", "api", "events"],
+  "depends": [],
+  "enabled_by_default": true
+}
