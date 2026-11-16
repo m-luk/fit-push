@@ -10,11 +10,21 @@ The quickest way is the run script (any OS, any Python 3.12+). It creates
 change:
 
 ```bash
-python scripts/run.py                        # http://127.0.0.1:8000, core + modules
+python scripts/run.py                        # own app window, core + modules
+python scripts/run.py --no-desktop           # server only, http://127.0.0.1:8000, no window
 python scripts/run.py --core-only            # without modules (or --modules a,b)
 python scripts/run.py --port 9000 --reload   # --host 0.0.0.0 to expose on the LAN
 python scripts/run.py --tests                # install dev requirements, run pytest
 ```
+
+By default `run.py` behaves like the desktop app. fit-push opens in its own window (Edge,
+Chrome or Brave app mode) as soon as the server is ready. On Windows the window has the
+fit-push icon and its own taskbar button. Closing the window stops the server, and stopping
+the server (Ctrl+C, closing its console) closes the window. A server of this checkout that
+is already running is brought up instead of a second one. If port 8000 is held by anything
+else, such as an installed release or another checkout, a free port is used. The first start
+installs Pillow into `.venv` once, to draw the icon. Use `--no-desktop` for a plain server
+(headless machines, remote development).
 
 In VS Code, **Terminal → Run Build Task** (Ctrl+Shift+B) runs `fit-push: run`;
 there are also *run (auto-reload)*, *run (core only)*, *tests* and *lint + types*.
@@ -34,8 +44,8 @@ it opens fit-push in its own app window, brings up an instance that is already r
 a second one, and picks a free port when 8000 is taken. Python changes restart the
 server; for JS/CSS just refresh the browser. It uses your normal data directory (with
 the usual backup on every start), so it sits next to an installed release without a
-clash; re-run `install` after moving the repo. The logo is used as the icon when Pillow
-is in `.venv` (`pip install pillow`).
+clash; re-run `install` after moving the repo. `install` draws the logo as the icon
+(installing Pillow into `.venv` if needed).
 
 Manual setup: `python -m venv .venv`, activate it, `pip install -r requirements.txt`,
 `python -m app` (see `python -m app --help`).

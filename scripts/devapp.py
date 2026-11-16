@@ -27,10 +27,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 NAME = "fit-push (dev)"
-ICON_DIR = ROOT / "build" / "devapp"
 
 sys.path.insert(0, str(ROOT / "scripts"))
-from run import ensure_requirements, ensure_venv  # noqa: E402
+from run import ensure_requirements, ensure_venv, make_icon  # noqa: E402
 
 
 def launcher_path() -> Path:
@@ -43,16 +42,6 @@ def launcher_path() -> Path:
     return data / "applications" / "fit-push-dev.desktop"
 
 
-def make_icon(py: Path) -> Path | None:
-    """Render the logo with the venv's Pillow; None (default icon) when Pillow is missing."""
-    out = ICON_DIR / ("fit-push.ico" if sys.platform == "win32" else "fit-push.png")
-    res = subprocess.run([str(py), str(ROOT / "packaging" / "make_icon.py"), str(out)], capture_output=True)
-    if res.returncode != 0:
-        print("note: Pillow not found in .venv, using the default icon (pip install pillow, then reinstall)")
-        return None
-    return out
-
-
 def ps_quote(s: str) -> str:
     return "'" + s.replace("'", "''") + "'"
 
@@ -60,7 +49,9 @@ def ps_quote(s: str) -> str:
 def install(extra: list[str]) -> int:
     py = ensure_venv()
     ensure_requirements(py, dev=False)
-    icon = make_icon(py)
+    icon = make_icon(py, install=True)
+    if icon is None:
+        print("note: could not draw the icon (Pillow), the launcher uses the default icon")
     script = ROOT / "scripts" / "devapp.py"
     dest = launcher_path()
     dest.parent.mkdir(parents=True, exist_ok=True)

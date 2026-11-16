@@ -9,7 +9,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
-from .. import __version__
+from .. import __version__, paths
 from ..core import Core
 from . import get_core
 
@@ -26,7 +26,7 @@ class SettingsIn(BaseModel):
 @router.get("/version")
 def version():
     """Identifies a running fit-push (the desktop launcher uses it to find an open instance)."""
-    return {"app": "fit-push", "version": __version__}
+    return {"app": "fit-push", "version": __version__, "instance": paths.instance()}
 
 
 @router.get("/sports")

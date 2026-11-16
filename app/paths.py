@@ -36,6 +36,17 @@ DB_NAME = "activities.db"
 LEGACY_DB = Path(__file__).resolve().parent.parent / "data" / DB_NAME
 
 
+def instance() -> str:
+    """Which installation this is: the desktop executable, or the source checkout.
+
+    A launcher only reuses a running server of the same installation, so starting a
+    checkout never just opens an installed release (or another checkout) instead.
+    """
+    if getattr(sys, "frozen", False):
+        return str(Path(sys.executable).resolve())
+    return str(Path(__file__).resolve().parent.parent)
+
+
 def setting(name: str, default: str | None = None) -> str | None:
     """Environment setting ``FITPUSH_<name>``, falling back to the old ``FITGIT_<name>``."""
     return os.environ.get(f"FITPUSH_{name}") or os.environ.get(f"FITGIT_{name}") or default
