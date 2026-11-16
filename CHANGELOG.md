@@ -8,6 +8,8 @@ How to update it: see "Changelog" in `AGENTS.md`.
 
 ## [Unreleased]
 
+## [0.5.0]
+
 ### Added
 
 - **Adventures** module: group activities into traverses (chained tracks) and multi-day
