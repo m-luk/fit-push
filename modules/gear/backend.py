@@ -17,7 +17,7 @@ Endpoints (under /api/m/gear):
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from pydantic import BaseModel, Field
 
@@ -242,7 +242,7 @@ def register(ctx: ModuleContext) -> None:
 
     @ctx.router.post("/gear", status_code=201)
     def add_gear(body: GearIn) -> dict:
-        now = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        now = datetime.now(UTC).isoformat(timespec="seconds")
         ctx.db.execute(
             f"INSERT INTO {items_t} (name, kind, notes, start_m, limit_m, created_at) VALUES (?, ?, ?, ?, ?, ?)",
             (body.name.strip(), check_kind(body.kind), body.notes.strip(), body.start_m, body.limit_m, now),

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run fit-push (or its tests) from any OS with any Python 3.10+ on PATH.
+"""Run fit-push (or its tests) from any OS with any Python 3.12+ on PATH.
 
 Creates ``.venv`` on first run, (re)installs requirements when they change,
 then runs the app or pytest with the venv's interpreter.
@@ -55,6 +55,9 @@ def ensure_requirements(py: Path, dev: bool) -> None:
 
 
 def main() -> int:
+    if sys.version_info < (3, 12):  # noqa: UP036 - runs before the venv, on any python on PATH
+        print(f"fit-push needs Python 3.12 or newer (this is {sys.version.split()[0]})", file=sys.stderr)
+        return 1
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8000)

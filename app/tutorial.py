@@ -14,7 +14,7 @@ import hashlib
 import itertools
 import math
 import random
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from .parsers import Activity, Point
 
@@ -58,7 +58,7 @@ def _on_loop(s: float) -> tuple[float, float]:
 def simulated_run(start: datetime | None = None, seed: int = 11) -> Activity:
     """The tutorial activity, starting at ``start`` (default: yesterday 07:00 UTC)."""
     if start is None:
-        start = datetime.now(timezone.utc).replace(hour=7, minute=0, second=0, microsecond=0) - timedelta(days=1)
+        start = datetime.now(UTC).replace(hour=7, minute=0, second=0, microsecond=0) - timedelta(days=1)
     rnd = random.Random(seed)
     laps = len(LAP_SPEEDS)
     gate = _on_loop(0.0)

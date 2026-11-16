@@ -8,6 +8,11 @@ How to update it: see "Changelog" in `AGENTS.md`.
 
 ## [Unreleased]
 
+### Removed
+
+- Support for Python 3.10 and 3.11 when running from source: fit-push now needs Python
+  3.12 or newer (the desktop app bundles its own Python and is not affected).
+
 ## [0.3.1] - 2026-11-15
 
 ### Fixed

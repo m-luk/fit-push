@@ -54,7 +54,7 @@ opens the browser.
 
 ### From source
 
-You need [Python 3.10 or newer](https://www.python.org/downloads/).
+You need [Python 3.12 or newer](https://www.python.org/downloads/).
 
 ```bash
 git clone <this repository> fit-push

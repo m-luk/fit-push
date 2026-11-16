@@ -5,7 +5,7 @@ with [modules/RULES.md](../modules/RULES.md) and [SDK.md](SDK.md).
 
 ## Running from source
 
-The quickest way is the run script (any OS, any Python 3.10+). It creates
+The quickest way is the run script (any OS, any Python 3.12+). It creates
 `.venv` and installs the requirements on first run, and again whenever they
 change:
 
