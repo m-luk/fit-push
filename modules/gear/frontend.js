@@ -24,6 +24,18 @@
   };
 
   // ---- Gear page --------------------------------------------------------------------------
+  // Ctrl+/ search: every gear item opens its focused view
+  sdk.registerSearch({
+    module: "gear", label: "Gear", icon: "🎽",
+    async items() {
+      const r = await sdk.api(`${API}/gear`);
+      return r.gear.map((g) => ({
+        title: g.name, hash: `#/m/gear?item=${g.id}`, extra: g.kind,
+        sub: [g.kind, g.retired ? "retired" : ""].filter(Boolean).join(" · "),
+      }));
+    },
+  });
+
   sdk.registerPage({
     module: "gear",
     label: "Gear",

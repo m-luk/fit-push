@@ -10,6 +10,10 @@ How to update it: see "Changelog" in `AGENTS.md`.
 
 ### Added
 
+- **Search**: press Ctrl+/ (or the Search button) to open a search box in the middle of the
+  screen that fuzzy-finds activities, segments, gear and adventures. Arrow keys and Enter
+  open the result. Before you type, it lists the last 5 things you opened from it, then the
+  most recently added items.
 - **All activities map** module: big markers show where activities start (nearby starts are
   grouped with a count); click one to zoom in on those activities. A marker disappears once
   its route is big enough to see.

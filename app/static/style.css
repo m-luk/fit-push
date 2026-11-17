@@ -199,6 +199,17 @@ dialog input[type="checkbox"] { width: auto; }
 dialog h3 { margin: 18px 0 2px; font-size: 14px; }
 #settings-dialog { max-height: calc(100vh - 32px); overflow: auto; }
 dialog.wide { width: min(460px, calc(100vw - 32px)); }
+#search-dialog { width: min(600px, calc(100vw - 32px)); height: min(460px, calc(100vh - 32px)); padding: 12px; margin: auto; overflow: hidden; }
+#search-dialog[open] { display: flex; flex-direction: column; gap: 8px; }
+#search-input { width: 100%; font-size: 16px; padding: 10px 12px; box-sizing: border-box; }
+#search-results { list-style: none; margin: 0; padding: 0; flex: 1; overflow-y: auto; min-height: 0; }
+#search-results li { display: flex; align-items: baseline; gap: 8px; padding: 7px 10px; border-radius: 8px; cursor: pointer; }
+#search-results li[aria-selected="true"] { background: var(--sel-fill); outline: 1px solid var(--sel-edge); }
+#search-results .sr-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#search-results .sr-sub { color: var(--text-muted); font-size: 12px; white-space: nowrap; }
+#search-results mark { background: none; color: var(--accent); font-weight: 600; }
+#search-results .sr-empty { color: var(--text-muted); cursor: default; justify-content: center; padding: 24px 0; }
+.search-foot { display: flex; justify-content: space-between; font-size: 12px; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
 .dialog-actions .push-left { margin-right: auto; }
 /* summary tile picker */

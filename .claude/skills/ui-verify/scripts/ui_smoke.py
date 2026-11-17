@@ -266,6 +266,37 @@ def run_browser(base: str, out: Path, work: Path, channel: str, synthetic: bool,
 
             step("map module", map_module)
 
+        def search():
+            page.goto(base + "#/")
+            page.wait_for_selector("#activity-list a")
+            page.keyboard.press("Control+/")
+            page.wait_for_selector("#search-dialog[open]")
+            box = page.locator("#search-dialog").bounding_box()
+            vp = page.viewport_size
+            if abs((box["y"] + box["height"] / 2) - vp["height"] / 2) > 4:
+                raise AssertionError(f"search box not vertically centred: {box}")
+            if page.locator("#search-results li[role=option]").count() < 1:
+                raise AssertionError("no results for an empty query")
+            name = page.locator("#activity-list .name").first.inner_text()
+            typo = name[:2] + name[3:] if len(name) > 4 else name  # a skipped letter still matches
+            page.fill("#search-input", typo)
+            page.wait_for_selector("#search-results li[role=option]")
+            page.screenshot(path=out / "11_search.png")
+            page.keyboard.press("Enter")
+            page.wait_for_function("location.hash.startsWith('#/activity/')")
+            if page.locator("#search-dialog[open]").count():
+                raise AssertionError("search dialog still open after Enter")
+            opened = page.evaluate("location.hash")
+            page.keyboard.press("Control+/")
+            page.wait_for_selector("#search-dialog[open]")
+            page.wait_for_selector("#search-results li[role=option]")
+            if page.locator("#search-results li").first.inner_text().find(name) < 0:
+                raise AssertionError("history: the item opened last is not first in an empty search")
+            page.keyboard.press("Escape")
+            page.wait_for_function("!document.querySelector('#search-dialog[open]')")
+
+        step("search (Ctrl+/)", search)
+
         def dark():
             page.goto(base + f"#/activity/{first}")
             page.wait_for_selector("#charts canvas")

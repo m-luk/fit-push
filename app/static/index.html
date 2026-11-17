@@ -22,6 +22,7 @@
       <a href="#/" data-tab="activities">Activities</a><a href="#/segments" data-tab="segments">Segments</a>
     </nav>
     <div class="topbar-actions">
+      <button class="btn ghost" id="search-btn" title="Search (Ctrl+/)" aria-label="Search">🔍<span class="btn-label"> Search</span></button>
       <div class="seg" role="group" aria-label="Units">
         <button data-units="metric">km</button><button data-units="imperial">mi</button>
       </div>
@@ -101,6 +102,12 @@
         <button value="save" class="btn primary">Save</button>
       </div>
     </form>
+  </dialog>
+
+  <dialog id="search-dialog" aria-label="Search">
+    <input type="search" id="search-input" placeholder="Search activities, gear, adventures, segments…" autocomplete="off" spellcheck="false" aria-label="Search" role="combobox" aria-expanded="true" aria-controls="search-results">
+    <ul id="search-results" role="listbox"></ul>
+    <div class="search-foot muted"><span>↑ ↓ select · Enter open · Esc close</span><span id="search-count"></span></div>
   </dialog>
 
   <div class="toast" id="toast" role="status" aria-live="polite"></div>

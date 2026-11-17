@@ -167,6 +167,14 @@ Add tags under an activity's title (type and press Enter; pick existing ones fro
 the suggestions; × removes). Tags are lower-cased and de-duplicated. Filter the
 sidebar list by tag, and use them in modules (for example the map).
 
+## Search
+
+Press **Ctrl+/** (or click Search in the top bar) to open a search box in the middle of
+the screen. It fuzzy-finds activities (name, sport, tags), segments, and, with the
+modules enabled, gear and adventures. Type several words to narrow down; typos and
+skipped letters are tolerated, accents are ignored. Before you type, it shows the last 5
+results you opened from it (↺), followed by the most recently added items. ↑ ↓ choose, Enter opens, Esc closes.
+
 ## Sports
 
 Running, cycling (generic, road, gravel, MTB), walking, hiking, skiing, ski

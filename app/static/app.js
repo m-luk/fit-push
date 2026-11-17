@@ -1169,7 +1169,7 @@
 
   window.addEventListener("mouseup", () => { if (state.drag) state.onDragEnd?.(); });
   window.addEventListener("keydown", (e) => {
-    if (e.key !== "Escape") return;
+    if (e.key !== "Escape" || searchDlg.open) return;
     if (state.pick) { endPick(); return; }
     if ($("#map-card.expanded")) { setMapExpanded(false); return; }
     if (state.sel && state.current) { state.sel = null; renderSelection(state.current); }
@@ -1710,6 +1710,152 @@
     draw(false);
   }
 
+  // ------------------------------------------------------------------ search (Ctrl+/)
+  // A palette over everything: core provides activities and segments, modules add their own
+  // through sdk.registerSearch (gear, adventures, ...). Fuzzy: every word of the query must match.
+  const searchProviders = []; // {module, label, icon, items(): [{title, sub?, extra?, hash}] | Promise}
+  const searchDlg = $("#search-dialog"), searchInput = $("#search-input"), searchList = $("#search-results");
+  const search = { items: [], shown: [], sel: 0, token: 0 };
+  const fold = (s) => String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/ł/g, "l").toLowerCase();
+
+  /** Match positions of `q` in `text` (both folded), or null. Substring first, else in-order subsequence. */
+  function fuzzyMatch(q, text) {
+    const at = text.indexOf(q);
+    if (at >= 0) {
+      const start = at === 0 || /[^a-z0-9]/.test(text[at - 1]);
+      return { score: 100 + (start ? 40 : 0) - at * 0.3, pos: Array.from({ length: q.length }, (_, i) => at + i) };
+    }
+    if (q.length < 3) return null; // short words must match literally, or everything matches
+    const pos = [];
+    let from = 0, gaps = 0;
+    for (const ch of q) {
+      const k = text.indexOf(ch, from);
+      if (k < 0) return null;
+      if (pos.length) gaps += k - pos[pos.length - 1] - 1;
+      pos.push(k); from = k + 1;
+    }
+    if (gaps > q.length * 3) return null;
+    return { score: 50 - gaps, pos };
+  }
+
+  function searchScore(words, it) {
+    let total = 0, pos = null;
+    for (const w of words) {
+      const t = fuzzyMatch(w, it.t), x = fuzzyMatch(w, it.x);
+      if (!t && !x) return null;
+      total += t ? t.score : x.score * 0.5;
+      if (t && words.length === 1) pos = t.pos;
+      if (!t && words.length === 1) pos = null;
+    }
+    return { score: total, pos };
+  }
+
+  function searchMark(title, pos) {
+    if (!pos) return esc(title);
+    const on = new Set(pos);
+    return [...title].map((c, i) => (on.has(i) ? `<mark>${esc(c)}</mark>` : esc(c))).join("");
+  }
+
+  const SEARCH_HISTORY = 5, SEARCH_RECENT = 10;
+  function searchHistory() { try { const h = JSON.parse(lsGet("searchHistory") || "[]"); return Array.isArray(h) ? h : []; } catch { return []; } }
+  const searchId = (it) => Number(/(\d+)(?!.*\d)/.exec(it.hash)?.[1] || 0); // record id from the link
+  function searchRemember(hash) {
+    lsSet("searchHistory", JSON.stringify([hash, ...searchHistory().filter((h) => h !== hash)].slice(0, 20)));
+  }
+
+  function searchRender() {
+    const words = fold(searchInput.value).split(/\s+/).filter(Boolean);
+    let hits;
+    if (!words.length) { // no query: the last 5 opened from search, then the most recently added items
+      const byHash = new Map(search.items.map((it) => [it.hash, it]));
+      const hist = searchHistory().map((h) => byHash.get(h)).filter(Boolean).slice(0, SEARCH_HISTORY);
+      const used = new Set(hist.map((it) => it.hash));
+      // newest first within each kind (ids grow with time), kinds interleaved
+      const groups = {};
+      for (const it of search.items) if (!used.has(it.hash)) (groups[it.group] ||= []).push(it);
+      const lanes = Object.values(groups).map((g) => g.sort((a, b) => searchId(b) - searchId(a)));
+      const fresh = [];
+      for (let i = 0; fresh.length < SEARCH_RECENT && lanes.some((l) => i < l.length); i++) {
+        for (const l of lanes) if (i < l.length && fresh.length < SEARCH_RECENT) fresh.push(l[i]);
+      }
+      hits = [...hist, ...fresh].map((it, i) => ({ it, pos: null, recent: i < hist.length }));
+    } else {
+      hits = search.items.map((it) => { const r = searchScore(words, it); return r && { it, pos: r.pos, score: r.score }; })
+        .filter(Boolean).sort((a, b) => b.score - a.score).slice(0, 50);
+    }
+    search.shown = hits;
+    search.sel = Math.min(search.sel, Math.max(0, hits.length - 1));
+    searchList.innerHTML = hits.length
+      ? hits.map((h, i) => `<li role="option" id="sr-${i}" data-i="${i}" aria-selected="${i === search.sel}">
+          <span aria-hidden="true">${esc(h.it.icon)}</span><span class="sr-title">${searchMark(h.it.title, h.pos)}</span>
+          <span class="sr-sub">${esc(h.it.sub || "")}</span><span class="badge">${h.recent ? "↺ " : ""}${esc(h.it.group)}</span></li>`).join("")
+      : `<li class="sr-empty">${search.loading ? "Loading…" : "Nothing found"}</li>`;
+    $("#search-count").textContent = words.length ? `${hits.length}${hits.length === 50 ? "+" : ""} result${hits.length === 1 ? "" : "s"}` : "";
+  }
+
+  function searchMove(d) {
+    if (!search.shown.length) return;
+    search.sel = (search.sel + d + search.shown.length) % search.shown.length;
+    searchList.querySelectorAll("li").forEach((li, i) => li.setAttribute("aria-selected", String(i === search.sel)));
+    const li = searchList.children[search.sel];
+    li.scrollIntoView({ block: "nearest" });
+    searchInput.setAttribute("aria-activedescendant", li.id);
+  }
+
+  function searchGo(i) {
+    const h = search.shown[i];
+    if (!h) return;
+    searchDlg.close();
+    searchRemember(h.it.hash);
+    if (location.hash === h.it.hash) route(); else location.hash = h.it.hash;
+  }
+
+  const searchEntry = (group, icon, o) => ({ group, icon, title: String(o.title || ""), sub: o.sub || "", hash: o.hash, t: fold(o.title), x: fold(`${o.sub || ""} ${o.extra || ""}`) });
+
+  function coreSearchItems() {
+    const acts = state.activities.map((a) => searchEntry("Activity", sportIcon(a.sport), {
+      title: a.name, hash: `#/activity/${a.id}`,
+      sub: [fmtDay(a.start_time), a.summary?.distance_m ? `${fmtDist(a.summary.distance_m)} ${u().distL}` : ""].filter(Boolean).join(" · "),
+      extra: `${sportName(a.sport)} ${(a.tags || []).join(" ")}`,
+    }));
+    const segs = state.segments.map((s) => searchEntry("Segment", sportIcon(s.sport), {
+      title: s.name, hash: `#/segment/${s.id}`, sub: `${fmtDist(s.distance_m)} ${u().distL}`, extra: sportName(s.sport),
+    }));
+    return [...acts, ...segs];
+  }
+
+  async function openSearch() {
+    if (searchDlg.open) { searchInput.select(); return; }
+    const token = ++search.token;
+    search.items = coreSearchItems(); search.sel = 0; search.loading = searchProviders.length > 0;
+    searchInput.value = "";
+    searchDlg.showModal();
+    searchRender();
+    await Promise.all(searchProviders.map(async (p) => {
+      try {
+        const rows = await p.items();
+        if (token !== search.token) return;
+        search.items.push(...rows.map((r) => searchEntry(p.label, p.icon, r)));
+      } catch (e) { console.error(`[module ${p.module}] search`, e); }
+    }));
+    if (token !== search.token) return;
+    search.loading = false; searchRender();
+  }
+
+  searchInput.addEventListener("input", () => { search.sel = 0; searchRender(); });
+  searchInput.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowDown") { e.preventDefault(); searchMove(1); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); searchMove(-1); }
+    else if (e.key === "Enter") { e.preventDefault(); searchGo(search.sel); }
+  });
+  searchList.addEventListener("click", (e) => { const li = e.target.closest("li[data-i]"); if (li) searchGo(Number(li.dataset.i)); });
+  searchDlg.addEventListener("click", (e) => { if (e.target === searchDlg) searchDlg.close(); }); // backdrop
+  searchDlg.addEventListener("close", () => { search.token++; });
+  $("#search-btn").addEventListener("click", openSearch);
+  window.addEventListener("keydown", (e) => {
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key === "/" || e.code === "Slash")) { e.preventDefault(); openSearch(); }
+  });
+
   // ------------------------------------------------------------------ module SDK (window.fitpush)
   // The only API frontend modules may use; documented in docs/SDK.md. Keep it stable.
   const modulePages = new Map(); // page id -> {module, id, label, icon, render}
@@ -1742,6 +1888,10 @@
         placement: def.placement === "header" ? "header" : "card",
       });
       moduleCards.sort((x, y) => x.order - y.order);
+    },
+    /** Make a module's records findable in the Ctrl+/ search; items() returns [{title, sub?, extra?, hash}]. */
+    registerSearch(def) {
+      searchProviders.push({ module: moduleOf(def), label: def.label || "Other", icon: def.icon || "🧩", items: def.items });
     },
     api, toast, esc, css, askName,
     navigate: (hash) => { location.hash = hash; },

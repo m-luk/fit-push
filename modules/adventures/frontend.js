@@ -30,6 +30,18 @@
     return Array.from({ length: n }, (_, i) => ramp[Math.round((i / (n - 1)) * 6)]);
   }
 
+  // Ctrl+/ search: every adventure opens its page
+  sdk.registerSearch({
+    module: "adventures", label: "Adventure", icon: "🏔",
+    async items() {
+      const list = await send("/adventures");
+      return list.map((a) => ({
+        title: a.name, hash: `#/m/adventures?id=${a.id}`, extra: a.type,
+        sub: [a.first_day ? day(a.first_day) : "", `${a.activities} activit${a.activities === 1 ? "y" : "ies"}`].filter(Boolean).join(" · "),
+      }));
+    },
+  });
+
   sdk.registerPage({
     module: "adventures",
     label: "Adventures",
