@@ -16,6 +16,14 @@ Backend (`/api/m/gear/...`):
 
 - `GET /gear`: gear items with usage totals (activities, distance including the
   starting distance, moving time, last use), default rules, kinds and sport groups.
+- `GET /gear/{id}/detail` (`?year=`): one item with its activities (newest first; `id, name, sport,
+  start_time, distance_m, moving_s, elev_gain_m, avg_speed_ms, avg_hr`), `stats` (totals,
+  elevation, average speed and distance, first/last use, longest activity) and `by_sport` /
+  `by_year` breakdowns. With `?year=2026` (`?` for undated activities) the activities, stats and
+  per-sport breakdown cover only that year (the starting distance is left out); `by_year` still
+  lists every year.
+- `GET /gear/{id}/tracks` (`?year=`): GPS lines (`id, name, sport, start_time, distance_m, track`) of
+  the item's activities that have GPS, oldest first; drawn on the item's map.
 - `GET /items`: the items only, without totals (cheap; used by the activity header line).
 - `POST /gear`, `PATCH /gear/{id}`, `DELETE /gear/{id}`: manage items (name, kind,
   notes, starting distance, distance limit, retired).
@@ -42,7 +50,11 @@ activity's rows. Changing defaults never rewrites past activities.
 Frontend: the **Gear** page (`#/m/gear`) lists items with totals and a limit bar, with
 forms to add/edit them and pick their defaults, and a **No gear** view (`?view=nogear`,
 `&sport=`) listing activities without gear with checkboxes to add an item to many at
-once. On activity pages a compact **Gear** line under the title and tags (an activity
+once. Clicking an item's name opens a focused view (`?item=<id>`) with statistics, a map of
+all its routes (coloured from older to newer, with big start markers that group nearby
+starts and zoom to fit them on click; hidden once a route is drawn large enough to see), two charts (running distance and
+vertical metres over time, one step per activity) and the list of its activities. Clicking a
+year in **By year** limits all of it to that year (`&year=`). On activity pages a compact **Gear** line under the title and tags (an activity
 card with `placement: "header"`, SDK 1.2) shows the activity's gear as chips with
 **Change** / **Reset**; it is hidden while no gear exists.
 

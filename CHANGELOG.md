@@ -8,6 +8,13 @@ How to update it: see "Changelog" in `AGENTS.md`.
 
 ## [Unreleased]
 
+### Added
+
+- **Gear** module: click a gear item's name (or its chip on an activity) to focus on it: totals,
+  elevation, average speed, first/last use, longest activity, breakdowns by sport and year, and the
+  full list of its activities, a map of all its routes, and charts of distance travelled and
+  vertical metres over time. Click a year in **By year** to limit all of it to that year.
+
 ## [0.5.0]
 
 ### Added

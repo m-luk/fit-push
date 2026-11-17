@@ -201,3 +201,55 @@ def test_review_regressions(make_client):
         raise AssertionError("empty name accepted")
     except Invalid:
         pass
+
+
+def test_detail_lists_activities_and_stats(make_client):
+    client = make_client(modules="gear")
+    shoes = _gear(client, "Shoes", "shoes", start_m=1000)
+    client.put(f"{API}/gear/{shoes}/defaults", json={"targets": ["sport:running"]})
+    a = upload(client, "a.gpx", to_gpx(synthetic_track()))
+    b = upload(client, "b.gpx", to_gpx(synthetic_track(start=START.replace(day=3))))
+    d = client.get(f"{API}/gear/{shoes}/detail").json()
+    assert {r["id"] for r in d["activities"]} == {a, b}
+    s = d["stats"]
+    assert s["activities"] == 2
+    assert s["distance_m"] == 1000 + s["used_m"] > 1000
+    assert s["first_used"] <= s["last_used"] and s["longest"]["id"] in {a, b}
+    assert d["by_sport"][0]["activities"] == 2 and d["by_year"][0]["activities"] == 2
+    assert client.get(f"{API}/gear/999/detail").status_code == 404
+    empty = _gear(client, "Unused", "other")
+    e = client.get(f"{API}/gear/{empty}/detail").json()
+    assert e["activities"] == [] and e["stats"]["longest"] is None and e["stats"]["avg_speed_ms"] is None
+
+
+def test_tracks_of_one_item(make_client):
+    client = make_client(modules="gear")
+    shoes = _gear(client, "Shoes", "shoes")
+    other = _gear(client, "Other", "shoes")
+    client.put(f"{API}/gear/{shoes}/defaults", json={"targets": ["sport:running"]})
+    a = upload(client, "a.gpx", to_gpx(synthetic_track()))
+    b = upload(client, "b.gpx", to_gpx(synthetic_track(start=START.replace(day=3))))
+    lines = client.get(f"{API}/gear/{shoes}/tracks").json()
+    assert [t["id"] for t in lines] == [a, b]  # oldest first
+    assert all(len(t["track"]) >= 2 and len(t["track"][0]) == 2 for t in lines)
+    assert client.get(f"{API}/gear/{other}/tracks").json() == []
+    assert client.get(f"{API}/gear/999/tracks").status_code == 404
+
+
+def test_year_filter(make_client):
+    client = make_client(modules="gear")
+    shoes = _gear(client, "Shoes", "shoes", start_m=1000)
+    client.put(f"{API}/gear/{shoes}/defaults", json={"targets": ["sport:running"]})
+    new = upload(client, "a.gpx", to_gpx(synthetic_track()))
+    old = upload(client, "b.gpx", to_gpx(synthetic_track(start=START.replace(year=START.year - 1))))
+    year = str(START.year)
+    d = client.get(f"{API}/gear/{shoes}/detail", params={"year": year}).json()
+    assert d["year"] == year and [r["id"] for r in d["activities"]] == [new]
+    assert d["stats"]["distance_m"] == d["stats"]["used_m"]  # the starting distance belongs to no year
+    assert [r["year"] for r in d["by_year"]] == [year, str(START.year - 1)]  # all years stay listed
+    assert d["by_sport"][0]["activities"] == 1
+    full = client.get(f"{API}/gear/{shoes}/detail").json()
+    assert full["year"] is None and full["stats"]["activities"] == 2 and full["stats"]["distance_m"] > 1000
+    assert [t["id"] for t in client.get(f"{API}/gear/{shoes}/tracks", params={"year": year}).json()] == [new]
+    assert [t["id"] for t in client.get(f"{API}/gear/{shoes}/tracks").json()] == [old, new]
+    assert client.get(f"{API}/gear/{shoes}/detail", params={"year": "1999"}).json()["activities"] == []

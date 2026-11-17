@@ -2,6 +2,8 @@
 
 Endpoints (under /api/m/gear):
     GET    /gear                      items with totals, defaults, kinds, sport groups
+    GET    /gear/{id}/detail          one item: its activities, totals, per-sport and per-year stats
+    GET    /gear/{id}/tracks          GPS lines of the item's activities (for its map)
     GET    /items                     items only (cheap; for pickers)
     POST   /gear                      add an item
     PATCH  /gear/{id}                 change an item (name, kind, notes, start_m, limit_m, retired)
@@ -233,6 +235,95 @@ def register(ctx: ModuleContext) -> None:
             "unassigned": unassigned,
             "no_gear": no_gear,
         }
+
+    @ctx.router.get("/gear/{gear_id}/detail")
+    def gear_detail(gear_id: int, year: str | None = None) -> dict:
+        """One item with its activities (newest first) and extra statistics.
+
+        ``year`` (e.g. ``2026``; ``?`` for activities without a date) limits the activities, statistics and
+        per-sport breakdown to that year; ``by_year`` always lists every year so another can be picked."""
+        g = item(gear_id)
+        ids = {r["activity_id"] for r in ctx.db.query(f"SELECT activity_id FROM {use_t} WHERE gear_id = ?", (gear_id,))}
+        acts = [a for a in ctx.core.list_activities() if a["id"] in ids]
+        rows, by_sport, by_year = [], {}, {}
+        longest = None
+        for a in acts:
+            s = a["summary"]
+            dist, mov = float(s.get("distance_m") or 0), float(s.get("moving_s") or 0)
+            yr = (a["start_time"] or "")[:4] or "?"
+            b = by_year.setdefault(yr, {"activities": 0, "distance_m": 0.0, "moving_s": 0.0})
+            b["activities"] += 1
+            b["distance_m"] += dist
+            b["moving_s"] += mov
+            if year and yr != year:
+                continue
+            rows.append(
+                {
+                    "id": a["id"],
+                    "name": a["name"],
+                    "sport": a["sport"],
+                    "start_time": a["start_time"],
+                    "distance_m": dist,
+                    "moving_s": mov,
+                    "elev_gain_m": float(s.get("elev_gain_m") or 0),
+                    "avg_speed_ms": s.get("avg_speed_ms"),
+                    "avg_hr": s.get("avg_hr"),
+                }
+            )
+            b = by_sport.setdefault(a["sport"], {"activities": 0, "distance_m": 0.0, "moving_s": 0.0})
+            b["activities"] += 1
+            b["distance_m"] += dist
+            b["moving_s"] += mov
+            if longest is None or dist > longest["distance_m"]:
+                longest = {"id": a["id"], "name": a["name"], "distance_m": dist}
+        used = sum(r["distance_m"] for r in rows)
+        moving = sum(r["moving_s"] for r in rows)
+        dated = sorted(r["start_time"] for r in rows if r["start_time"])
+        return {
+            "gear": {**g, "retired": bool(g["retired"])},
+            "year": year or None,
+            "activities": rows,
+            "stats": {
+                "activities": len(rows),
+                "used_m": used,
+                "distance_m": used if year else g["start_m"] + used,  # the starting distance belongs to no year
+                "moving_s": moving,
+                "elev_gain_m": sum(r["elev_gain_m"] for r in rows),
+                "avg_speed_ms": used / moving if moving else None,
+                "avg_distance_m": used / len(rows) if rows else None,
+                "first_used": dated[0] if dated else None,
+                "last_used": dated[-1] if dated else None,
+                "longest": longest if longest and longest["distance_m"] > 0 else None,
+            },
+            "by_sport": [{"sport": k, **v} for k, v in sorted(by_sport.items(), key=lambda kv: -kv[1]["distance_m"])],
+            "by_year": [{"year": k, **v} for k, v in sorted(by_year.items(), reverse=True)],
+        }
+
+    @ctx.router.get("/gear/{gear_id}/tracks")
+    def gear_tracks(gear_id: int, year: str | None = None) -> list[dict]:
+        """GPS lines of the activities that used the item (oldest first, so recent ones draw on top);
+        ``year`` limits them to that year."""
+        item(gear_id)
+        ids = {r["activity_id"] for r in ctx.db.query(f"SELECT activity_id FROM {use_t} WHERE gear_id = ?", (gear_id,))}
+        out = []
+        for a in reversed(ctx.core.list_activities()):
+            if a["id"] not in ids or not a["summary"].get("has_gps"):
+                continue
+            if year and ((a["start_time"] or "")[:4] or "?") != year:
+                continue
+            if len(points := ctx.core.track(a["id"], step_m=25, max_points=500)) < 2:
+                continue
+            out.append(
+                {
+                    "id": a["id"],
+                    "name": a["name"],
+                    "sport": a["sport"],
+                    "start_time": a["start_time"],
+                    "distance_m": float(a["summary"].get("distance_m") or 0),
+                    "track": points,
+                }
+            )
+        return out
 
     @ctx.router.get("/items")
     def list_items() -> list[dict]:

@@ -29,7 +29,20 @@ sports (e.g. All cycling), and every new activity of that sport gets it automati
 6. On an activity page, the **Gear** line under the title shows its gear. Click
    **Change** (or **Add**), tick the items you used and click **Save**. **Reset** undoes
    a manual choice; click an item to open the **Gear** page.
-7. When an item is worn out, click **Retire**: it keeps its history but is no longer
+7. To look at one item closely, click its name (or its chip on an activity page). You see
+   totals, elevation, average speed, first and last use, the longest activity, breakdowns
+   by sport and year, and below them:
+   - a **Map** with the route of every activity that used it (older routes in cooler
+     colours; hover for the name, click to open the activity). Big round markers show where
+     activities start; a number means several start close together. Click a marker to zoom
+     in and fit those activities; once a route is big enough to see, its marker disappears;
+   - **Over time**: two charts with the running total of distance travelled and of vertical
+     metres, stepping up at each activity;
+   - the list of all activities that used it.
+
+   Click a year in **By year** to limit all of this to that year (the starting distance is
+   left out); click it again, or **All years**, to undo. Click **← All gear** to go back.
+8. When an item is worn out, click **Retire**: it keeps its history but is no longer
    assigned automatically. **Unretire** brings it back; **Delete** (click twice) removes
    it and its history.
 

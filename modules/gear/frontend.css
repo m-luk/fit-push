@@ -53,6 +53,43 @@
 .gr-table .gr-date { font-variant-numeric: tabular-nums; }
 .gr-table td { text-align: left; }
 .gr-table td.num { text-align: right; }
+/* focused view of one item */
+#gr-detail[hidden] { display: none; }
+.gr-detail { display: flex; flex-direction: column; gap: 12px; margin-bottom: 12px; }
+.gr-detail .gr-detail { margin: 0; }
+.gr-mapcard[hidden] { display: none; }
+.gr-mapcard h3 { margin: 0 0 8px; font-size: 15px; }
+.gr-map { height: 380px; border-radius: 8px; overflow: hidden; margin-bottom: 6px; }
+.gr-mk-wrap { background: none; border: 0; }
+.gr-mk { display: flex; align-items: center; justify-content: center; box-sizing: border-box; border-radius: 50%;
+  background: var(--accent); color: #fff; border: 3px solid var(--surface-1); box-shadow: 0 1px 6px rgba(0, 0, 0, .45);
+  font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums; cursor: pointer; }
+.gr-mk-wrap:hover .gr-mk, .gr-mk-wrap:focus-visible .gr-mk { transform: scale(1.1); }
+.gr-mk-wrap:focus-visible { outline: none; }
+.gr-mk-wrap:focus-visible .gr-mk { outline: 2px solid var(--text-primary); outline-offset: 2px; }
+.gr-yearbtn { font-size: 13px; padding: 0 2px; }
+.gr-detail .gr-table tbody tr.gr-yr { cursor: pointer; }
+.gr-yr-on td { background: var(--sel-fill); font-weight: 600; }
+.gr-yearbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.gr-chartcard[hidden] { display: none; }
+.gr-chartcard h3 { margin: 0 0 8px; font-size: 15px; }
+.gr-charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+.gr-chartbox { margin: 0; min-width: 0; }
+.gr-canvas { position: relative; height: 180px; }
+.gr-name-link { border: 0; background: none; padding: 0; font: inherit; font-weight: inherit; color: var(--accent); cursor: pointer; text-align: left; }
+.gr-name-link:hover { text-decoration: underline; }
+.gr-name-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+.gr-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); grid-auto-rows: 1fr; gap: 10px; }
+.gr-tile { min-width: 0; background: var(--surface-1); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
+/* Longest: value on the left, activity link on the right (cut with an ellipsis, so the tile never grows) */
+.gr-tile-row { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; min-width: 0; }
+.gr-tile-row > span { flex: none; }
+.gr-tile-link { flex: 0 1 auto; min-width: 0; font-size: 12px; font-weight: 400; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: right; }
+.gr-tile-v { font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.gr-tile-v .unit { font-size: 13px; font-weight: 400; color: var(--text-secondary); }
+.gr-split { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+.gr-split h3, .gr-detail .card > h3 { margin: 0 0 8px; font-size: 15px; }
+.gr-detail .gr-table tbody tr { cursor: default; }
 /* activity header line */
 .gr-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-height: 24px; }
 .gr-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; line-height: 1; padding: 4px 9px; border-radius: 999px;
