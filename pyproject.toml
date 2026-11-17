@@ -4,7 +4,7 @@ version = "0.5.0"
 description = "Local web app to analyse and visualise sports activity files (FIT, GPX, TCX)"
 requires-python = ">=3.12"
 readme = "README.md"
-license = "MIT"
+license = "AGPL-3.0-only"
 
 # ----------------------------------------------------------------------------- pytest
 [tool.pytest.ini_options]

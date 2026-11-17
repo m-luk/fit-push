@@ -18,6 +18,11 @@ How to update it: see "Changelog" in `AGENTS.md`.
   full list of its activities, a map of all its routes, and charts of distance travelled and
   vertical metres over time. Click a year in **By year** to limit all of it to that year.
 
+### Changed
+
+- fit-push is now licensed under the GNU Affero General Public License v3.0 (AGPL-3.0-only)
+  instead of MIT. Releases up to 0.5.0 stay available under MIT.
+
 ## [0.5.0]
 
 ### Added

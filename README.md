@@ -104,4 +104,4 @@ app lists every module with its manual. Run without any with
 
 ## License
 
-[MIT](LICENSE). Map data © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors.
+[AGPL-3.0](LICENSE): if you run a modified version as a network service, you must offer its users the source. Map data © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors.
