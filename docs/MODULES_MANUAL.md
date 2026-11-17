@@ -5,7 +5,7 @@ User manuals of all installed modules, collected from `modules/<id>/MANUAL.md`.
 
 ## All activities map
 
-*Module `activity_map` v1.0.0 · owner @m-luk*
+*Module `activity_map` v1.1.0 · owner @m-luk*
 
 
 ### What it does
@@ -30,7 +30,10 @@ long ago). Clicking a route opens that activity.
 6. **Colour by**: *Sport* uses one colour per sport (legend bottom-left);
    *Date* goes from light blue (oldest shown) to dark blue (newest), with the date
    span in the legend.
-7. The filters are part of the page address, so you can bookmark a view (for
+7. Big round markers show where activities start; a number means several start close
+   together. Click a marker to zoom in and fit those activities. Once a route is big
+   enough to see, its marker disappears.
+8. The filters are part of the page address, so you can bookmark a view (for
    example "gravel rides this year").
 
 ### Limitations

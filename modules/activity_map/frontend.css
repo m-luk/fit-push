@@ -15,4 +15,12 @@
 .am-map { height: max(420px, calc(100vh - 300px)); border-radius: 8px; z-index: 0; }
 .am-legend { min-width: 140px; }
 .am-lg-row { display: flex; align-items: center; gap: 6px; margin-top: 3px; }
+/* start markers: grouped count bubbles that disappear once their routes are big enough to see */
+.am-mk-wrap { background: none; border: 0; }
+.am-mk { display: flex; align-items: center; justify-content: center; box-sizing: border-box; border-radius: 50%;
+  background: var(--accent); color: #fff; border: 3px solid var(--surface-1); box-shadow: 0 1px 6px rgba(0, 0, 0, .45);
+  font-size: 14px; font-weight: 700; font-variant-numeric: tabular-nums; cursor: pointer; }
+.am-mk-wrap:hover .am-mk, .am-mk-wrap:focus-visible .am-mk { transform: scale(1.1); }
+.am-mk-wrap:focus-visible { outline: none; }
+.am-mk-wrap:focus-visible .am-mk { outline: 2px solid var(--text-primary); outline-offset: 2px; }
 @media (max-width: 640px) { .am-spacer { display: none; } .am-map { height: 60vh; } }

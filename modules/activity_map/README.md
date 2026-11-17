@@ -19,7 +19,9 @@ date span that exist, for the filter controls.
 The frontend registers the **Map** page (`#/m/activity_map`). It draws the lines
 with `fitpush.map()`, colours them by sport (categorical `--cat-*` tokens, legend
 toggles, tooltips) or by date (sequential blue `--ov-*` ramp), and keeps the
-filters in the URL so a view can be bookmarked.
+filters in the URL so a view can be bookmarked. Big start markers (activities that start
+within about 44 px of each other share one marker with a count) zoom to fit their
+activities on click and disappear once a route is drawn at least 80 px across.
 
 ## Data
 

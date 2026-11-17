@@ -10,6 +10,9 @@ How to update it: see "Changelog" in `AGENTS.md`.
 
 ### Added
 
+- **All activities map** module: big markers show where activities start (nearby starts are
+  grouped with a count); click one to zoom in on those activities. A marker disappears once
+  its route is big enough to see.
 - **Gear** module: click a gear item's name (or its chip on an activity) to focus on it: totals,
   elevation, average speed, first/last use, longest activity, breakdowns by sport and year, and the
   full list of its activities, a map of all its routes, and charts of distance travelled and

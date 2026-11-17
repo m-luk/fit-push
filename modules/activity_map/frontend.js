@@ -57,7 +57,39 @@
       const legend = L.control({ position: "bottomleft" });
       legend.onAdd = () => L.DomUtil.create("div", "map-legend am-legend");
       legend.addTo(map);
-      let fitted = false, timer = null, seq = 0;
+      const markers = L.layerGroup().addTo(map);
+      let fitted = false, timer = null, seq = 0, items = [];
+
+      // Big markers: activities that start close together (in screen pixels) share one marker with a
+      // count; clicking it zooms to fit those activities. Re-grouped on every zoom; an activity whose
+      // route is already drawn large (>= 80 px across) gets no marker.
+      function drawMarkers() {
+        markers.clearLayers();
+        const R = 44, VISIBLE = 80, groups = [];
+        for (const it of items) {
+          const sw = map.latLngToLayerPoint(it.bounds.getSouthWest()), ne = map.latLngToLayerPoint(it.bounds.getNorthEast());
+          if (Math.hypot(ne.x - sw.x, ne.y - sw.y) >= VISIBLE) continue;
+          const p = map.latLngToLayerPoint(it.start);
+          const grp = groups.find((g) => Math.hypot(g.x - p.x, g.y - p.y) < R);
+          if (grp) { grp.items.push(it); grp.x += (p.x - grp.x) / grp.items.length; grp.y += (p.y - grp.y) / grp.items.length; }
+          else groups.push({ x: p.x, y: p.y, items: [it] });
+        }
+        for (const g of groups) {
+          const n = g.items.length, size = n > 1 ? 40 + Math.min(16, 4 * String(n).length) : 34;
+          const names = g.items.slice(-3).map((i) => esc(i.a.name)).join("<br>");
+          const title = n > 1 ? `${n} activities: zoom in` : "Zoom to this activity";
+          const icon = L.divIcon({ className: "am-mk-wrap", iconSize: [size, size],
+            html: `<span class="am-mk" style="width:${size}px;height:${size}px">${n > 1 ? n : "▶"}</span>` });
+          L.marker(map.layerPointToLatLng([g.x, g.y]), { icon, title, keyboard: true, riseOnHover: true })
+            .bindTooltip(`${names}${n > 3 ? `<br>+${n - 3} more` : ""}`, { direction: "top", offset: [0, -size / 2] })
+            .on("click", () => {
+              const b = L.latLngBounds(g.items.flatMap((i) => [i.bounds.getSouthWest(), i.bounds.getNorthEast()]));
+              map.fitBounds(b, { padding: [48, 48], animate: false, maxZoom: 16 });
+            })
+            .addTo(markers);
+        }
+      }
+      map.on("zoomend", drawMarkers);
 
       function syncControls() {
         el.querySelectorAll("[data-sport]").forEach((b) => b.setAttribute("aria-pressed", String(st.sports.has(b.dataset.sport))));
@@ -104,8 +136,10 @@
         }
         if (bounds && !fitted) { map.fitBounds(bounds, { padding: [24, 24], animate: false }); fitted = true; }
         if (!bounds) map.setView([20, 0], 2, { animate: false });
+        items = ordered.map((a) => ({ a, start: a.track[0], bounds: L.latLngBounds(a.track) }));
+        drawMarkers(); // fitBounds fires no zoomend when the zoom does not change
         $("#am-status").textContent = acts.length
-          ? `${acts.length} activit${acts.length === 1 ? "y" : "ies"} · ${sdk.fmt.dist(dist, 0)} ${sdk.fmt.units().distL} · click a route to open it`
+          ? `${acts.length} activit${acts.length === 1 ? "y" : "ies"} · ${sdk.fmt.dist(dist, 0)} ${sdk.fmt.units().distL} · click a marker to zoom in, a route to open it`
           : "No activities with GPS match these filters.";
         const lg = legend.getContainer();
         if (st.color === "date") {
